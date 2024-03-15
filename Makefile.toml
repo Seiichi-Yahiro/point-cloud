@@ -1,0 +1,26 @@
+# install with:
+# cargo install --force cargo-make
+
+# run with:
+# cargo make <task name>
+
+[tasks.release]
+env = { "RUST_LOG" = "point_cloud=debug,wgpu=warn" }
+command = "cargo"
+args = [
+    "run",
+    "--package", "point-cloud",
+    "--bin", "point_cloud",
+    "--release"
+]
+
+[tasks.web]
+env = { "RUSTFLAGS" = "--cfg=web_sys_unstable_apis" }
+command = "wasm-pack"
+args = [
+    "build",
+    "--target", "web",
+    "--weak-refs",
+    "--release",
+    ".",
+]
