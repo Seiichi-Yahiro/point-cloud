@@ -4,6 +4,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 
 use crate::gpu::GPU;
+use crate::point_renderer::PointRenderer;
 use crate::viewport::{Viewport, ViewportDescriptor};
 
 type UserEvent = ();
@@ -11,6 +12,7 @@ type UserEvent = ();
 pub struct App {
     viewport: Viewport,
     gpu: GPU,
+    point_renderer: PointRenderer,
 }
 
 impl App {
@@ -32,8 +34,13 @@ impl App {
 
         let gpu = GPU::new(&adapter).await;
         let viewport = viewport_desc.build(&adapter, gpu.device());
+        let point_renderer = PointRenderer::new(gpu.device(), viewport.config());
 
-        let mut app = App { viewport, gpu };
+        let mut app = App {
+            viewport,
+            gpu,
+            point_renderer,
+        };
 
         let event_handler =
             move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| match event {
@@ -42,7 +49,8 @@ impl App {
                     ..
                 } => match window_event {
                     WindowEvent::RedrawRequested => {
-                        app.render();
+                        app.update();
+                        app.draw();
                     }
                     WindowEvent::Resized(new_size) => {
                         app.resize(new_size);
@@ -67,9 +75,15 @@ impl App {
 
     fn resize(&mut self, physical_size: PhysicalSize<u32>) {
         self.viewport.resize(self.gpu.device(), physical_size);
+        self.point_renderer
+            .resize(self.gpu.queue(), self.viewport.config());
     }
 
-    fn render(&self) {
+    fn update(&mut self) {
+        self.point_renderer.update();
+    }
+
+    fn draw(&self) {
         let frame = self
             .viewport
             .surface()
@@ -85,27 +99,7 @@ impl App {
             .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
-        let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.16,
-                        g: 0.16,
-                        b: 0.16,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        drop(render_pass);
+        self.point_renderer.draw(&view, &mut encoder);
 
         self.gpu.queue().submit(Some(encoder.finish()));
         frame.present();
