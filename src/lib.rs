@@ -3,6 +3,7 @@ pub use app::App;
 mod app;
 mod camera;
 mod gpu;
+mod input_data;
 mod point_renderer;
 mod transform;
 mod viewport;

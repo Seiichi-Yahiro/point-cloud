@@ -4,6 +4,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 
 use crate::gpu::GPU;
+use crate::input_data::InputData;
 use crate::point_renderer::PointRenderer;
 use crate::viewport::{Viewport, ViewportDescriptor};
 
@@ -13,6 +14,7 @@ pub struct App {
     viewport: Viewport,
     gpu: GPU,
     point_renderer: PointRenderer,
+    input_data: InputData,
 }
 
 impl App {
@@ -40,6 +42,7 @@ impl App {
             viewport,
             gpu,
             point_renderer,
+            input_data: InputData::default(),
         };
 
         let event_handler =
@@ -47,19 +50,25 @@ impl App {
                 Event::WindowEvent {
                     event: window_event,
                     ..
-                } => match window_event {
-                    WindowEvent::RedrawRequested => {
-                        app.update();
-                        app.draw();
+                } => {
+                    app.input_data.process_event(&window_event);
+
+                    match window_event {
+                        WindowEvent::RedrawRequested => {
+                            app.update();
+                            app.draw();
+                            app.input_data.clear_events();
+                            app.viewport.window().request_redraw();
+                        }
+                        WindowEvent::Resized(new_size) => {
+                            app.resize(new_size);
+                        }
+                        WindowEvent::CloseRequested => {
+                            target.exit();
+                        }
+                        _ => {}
                     }
-                    WindowEvent::Resized(new_size) => {
-                        app.resize(new_size);
-                    }
-                    WindowEvent::CloseRequested => {
-                        target.exit();
-                    }
-                    _ => {}
-                },
+                }
                 _ => {}
             };
 
@@ -75,12 +84,12 @@ impl App {
 
     fn resize(&mut self, physical_size: PhysicalSize<u32>) {
         self.viewport.resize(self.gpu.device(), physical_size);
-        self.point_renderer
-            .resize(self.gpu.queue(), self.viewport.config());
+        self.point_renderer.resize(self.viewport.config());
     }
 
     fn update(&mut self) {
-        self.point_renderer.update();
+        self.point_renderer
+            .update(self.gpu.queue(), &self.input_data);
     }
 
     fn draw(&self) {

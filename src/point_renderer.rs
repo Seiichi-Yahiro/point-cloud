@@ -1,7 +1,8 @@
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::camera::Camera;
+use crate::camera::{Camera, FlyCamController};
+use crate::input_data::InputData;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -30,7 +31,7 @@ struct VertexBuffer {
 }
 
 pub struct PointRenderer {
-    camera: Camera,
+    camera_controller: FlyCamController,
     pipeline: wgpu::RenderPipeline,
     view_projection_uniform: wgpu::Buffer,
     view_projection_bind_group: wgpu::BindGroup,
@@ -138,7 +139,7 @@ impl PointRenderer {
         });
 
         Self {
-            camera,
+            camera_controller: FlyCamController::new(camera),
             pipeline,
             view_projection_uniform,
             view_projection_bind_group,
@@ -146,19 +147,23 @@ impl PointRenderer {
         }
     }
 
-    pub fn resize(&mut self, queue: &wgpu::Queue, config: &wgpu::SurfaceConfiguration) {
-        self.camera.projection.aspect_ratio = config.width as f32 / config.height as f32;
+    pub fn resize(&mut self, config: &wgpu::SurfaceConfiguration) {
+        self.camera_controller.camera_mut().projection.aspect_ratio =
+            config.width as f32 / config.height as f32;
+    }
+
+    pub fn update(&mut self, queue: &wgpu::Queue, input_data: &InputData) {
+        self.camera_controller.update(input_data);
+
         queue.write_buffer(
             &self.view_projection_uniform,
             0,
             bytemuck::cast_slice(&[
-                self.camera.get_view_matrix(),
-                self.camera.get_view_projection_matrix(),
+                self.camera_controller.camera().get_view_matrix(),
+                self.camera_controller.camera().get_projection_matrix(),
             ]),
         )
     }
-
-    pub fn update(&mut self) {}
 
     pub fn draw(&self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
