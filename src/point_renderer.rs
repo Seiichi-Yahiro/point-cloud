@@ -3,6 +3,7 @@ use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, FlyCamController};
 use crate::input_data::InputData;
+use crate::texture::Texture;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -36,6 +37,7 @@ pub struct PointRenderer {
     view_projection_uniform: wgpu::Buffer,
     view_projection_bind_group: wgpu::BindGroup,
     point_buffers: Vec<VertexBuffer>,
+    depth_texture: Texture,
 }
 
 impl PointRenderer {
@@ -88,7 +90,7 @@ impl PointRenderer {
                         color: [255, 0, 0, 255],
                     },
                     Vertex {
-                        position: Vec3::new(0.5, 0.5, -1.0),
+                        position: Vec3::new(0.1, 0.1, 0.00000001),
                         color: [0, 255, 0, 255],
                     },
                 ]),
@@ -120,7 +122,13 @@ impl PointRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None, // TODO
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_TEXTURE_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -144,12 +152,15 @@ impl PointRenderer {
             view_projection_uniform,
             view_projection_bind_group,
             point_buffers: vec![vertex_buffer],
+            depth_texture: Texture::create_depth_texture(device, config),
         }
     }
 
-    pub fn resize(&mut self, config: &wgpu::SurfaceConfiguration) {
+    pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
         self.camera_controller.camera_mut().projection.aspect_ratio =
             config.width as f32 / config.height as f32;
+
+        self.depth_texture = Texture::create_depth_texture(device, config);
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, input_data: &InputData) {
@@ -181,7 +192,14 @@ impl PointRenderer {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None, // TODO
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
         });
