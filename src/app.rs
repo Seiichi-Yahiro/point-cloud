@@ -1,4 +1,5 @@
 use cfg_if::cfg_if;
+use wgpu::SurfaceError;
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
@@ -46,17 +47,36 @@ impl App {
         };
 
         let event_handler =
-            move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| match event {
-                Event::WindowEvent {
+            move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| {
+                if let Event::WindowEvent {
                     event: window_event,
                     ..
-                } => {
+                } = event
+                {
                     app.input_data.process_event(&window_event);
 
                     match window_event {
                         WindowEvent::RedrawRequested => {
                             app.update();
-                            app.draw();
+
+                            if let Err(err) = app.draw() {
+                                match err {
+                                    SurfaceError::Timeout => {
+                                        log::warn!("Timeout while trying to acquire next frame!")
+                                    }
+                                    SurfaceError::Outdated => {
+                                        // happens when window gets minimized
+                                    }
+                                    SurfaceError::Lost => {
+                                        app.resize(app.viewport.window().inner_size());
+                                    }
+                                    SurfaceError::OutOfMemory => {
+                                        log::error!("Application is out of memory!");
+                                        target.exit();
+                                    }
+                                }
+                            }
+
                             app.input_data.clear_events();
                             app.viewport.window().request_redraw();
                         }
@@ -69,7 +89,6 @@ impl App {
                         _ => {}
                     }
                 }
-                _ => {}
             };
 
         cfg_if! {
@@ -84,7 +103,8 @@ impl App {
 
     fn resize(&mut self, physical_size: PhysicalSize<u32>) {
         self.viewport.resize(self.gpu.device(), physical_size);
-        self.point_renderer.resize(self.viewport.config());
+        self.point_renderer
+            .resize(self.gpu.device(), self.viewport.config());
     }
 
     fn update(&mut self) {
@@ -92,12 +112,8 @@ impl App {
             .update(self.gpu.queue(), &self.input_data);
     }
 
-    fn draw(&self) {
-        let frame = self
-            .viewport
-            .surface()
-            .get_current_texture()
-            .expect("Failed to acquire next swap chain texture");
+    fn draw(&self) -> Result<(), wgpu::SurfaceError> {
+        let frame = self.viewport.surface().get_current_texture()?;
 
         let view = frame
             .texture
@@ -112,6 +128,8 @@ impl App {
 
         self.gpu.queue().submit(Some(encoder.finish()));
         frame.present();
+
+        Ok(())
     }
 }
 
