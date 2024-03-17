@@ -48,13 +48,13 @@ impl App {
 
         let event_handler =
             move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| {
+                app.input_data.process_event(&event);
+
                 if let Event::WindowEvent {
                     event: window_event,
                     ..
                 } = event
                 {
-                    app.input_data.process_event(&window_event);
-
                     match window_event {
                         WindowEvent::RedrawRequested => {
                             app.update();
