@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use cfg_if::cfg_if;
 use winit::dpi::PhysicalSize;
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
@@ -11,26 +12,26 @@ pub struct ViewportDescriptor {
 
 impl ViewportDescriptor {
     pub fn new<T>(event_loop: &EventLoop<T>, instance: &wgpu::Instance) -> Self {
-        #[allow(unused_mut)]
-        let mut window_builder = WindowBuilder::new()
-            .with_title("Point Cloud")
-            .with_inner_size(PhysicalSize::new(800, 600));
+        let mut window_builder = WindowBuilder::new().with_title("Point Cloud");
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            use wasm_bindgen::JsCast;
-            use winit::platform::web::WindowBuilderExtWebSys;
+        cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                use wasm_bindgen::JsCast;
+                use winit::platform::web::WindowBuilderExtWebSys;
 
-            let canvas = web_sys::window()
-                .unwrap()
-                .document()
-                .unwrap()
-                .get_element_by_id("point-cloud-canvas")
-                .unwrap()
-                .dyn_into::<web_sys::HtmlCanvasElement>()
-                .unwrap();
+                let canvas = web_sys::window()
+                    .unwrap()
+                    .document()
+                    .unwrap()
+                    .get_element_by_id("point-cloud-canvas")
+                    .unwrap()
+                    .dyn_into::<web_sys::HtmlCanvasElement>()
+                    .unwrap();
 
-            window_builder = window_builder.with_canvas(Some(canvas));
+                window_builder = window_builder.with_canvas(Some(canvas));
+            } else {
+                window_builder = window_builder.with_inner_size(PhysicalSize::new(800, 600));
+            }
         }
 
         let window = window_builder.build(event_loop).unwrap();
