@@ -1,12 +1,14 @@
 use cfg_if::cfg_if;
-use wgpu::SurfaceError;
+use egui_wgpu::ScreenDescriptor;
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 
+use crate::fps::FPS;
 use crate::gpu::GPU;
 use crate::input_data::InputData;
 use crate::point_renderer::PointRenderer;
+use crate::ui::EguiRenderer;
 use crate::viewport::{Viewport, ViewportDescriptor};
 
 type UserEvent = ();
@@ -15,7 +17,9 @@ pub struct App {
     viewport: Viewport,
     gpu: GPU,
     point_renderer: PointRenderer,
+    ui: EguiRenderer,
     input_data: InputData,
+    fps: FPS,
 }
 
 impl App {
@@ -38,12 +42,15 @@ impl App {
         let gpu = GPU::new(&adapter).await;
         let viewport = viewport_desc.build(&adapter, gpu.device());
         let point_renderer = PointRenderer::new(gpu.device(), viewport.config());
+        let ui = EguiRenderer::new(gpu.device(), viewport.config().format, &viewport.window());
 
         let mut app = App {
             viewport,
             gpu,
             point_renderer,
+            ui,
             input_data: InputData::default(),
+            fps: FPS::new(),
         };
 
         let event_handler =
@@ -55,22 +62,33 @@ impl App {
                     ..
                 } = event
                 {
+                    let ui_event_response =
+                        app.ui.handle_input(&app.viewport.window(), &window_event);
+
+                    if ui_event_response.repaint {
+                        app.viewport.window().request_redraw();
+                    }
+
+                    if ui_event_response.consumed {
+                        return;
+                    }
+
                     match window_event {
                         WindowEvent::RedrawRequested => {
                             app.update();
 
                             if let Err(err) = app.draw() {
                                 match err {
-                                    SurfaceError::Timeout => {
+                                    wgpu::SurfaceError::Timeout => {
                                         log::warn!("Timeout while trying to acquire next frame!")
                                     }
-                                    SurfaceError::Outdated => {
+                                    wgpu::SurfaceError::Outdated => {
                                         // happens when window gets minimized
                                     }
-                                    SurfaceError::Lost => {
+                                    wgpu::SurfaceError::Lost => {
                                         app.resize(app.viewport.window().inner_size());
                                     }
-                                    SurfaceError::OutOfMemory => {
+                                    wgpu::SurfaceError::OutOfMemory => {
                                         log::error!("Application is out of memory!");
                                         target.exit();
                                     }
@@ -108,11 +126,12 @@ impl App {
     }
 
     fn update(&mut self) {
+        self.fps.update();
         self.point_renderer
             .update(self.gpu.queue(), &self.input_data);
     }
 
-    fn draw(&self) -> Result<(), wgpu::SurfaceError> {
+    fn draw(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self.viewport.surface().get_current_texture()?;
 
         let view = frame
@@ -125,11 +144,30 @@ impl App {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
         self.point_renderer.draw(&view, &mut encoder);
+        self.draw_ui(&view, &mut encoder);
 
         self.gpu.queue().submit(Some(encoder.finish()));
         frame.present();
 
         Ok(())
+    }
+
+    fn draw_ui(&mut self, render_target: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+        self.ui.draw(
+            &self.gpu,
+            encoder,
+            &self.viewport.window(),
+            render_target,
+            ScreenDescriptor {
+                size_in_pixels: [self.viewport.config().width, self.viewport.config().height],
+                pixels_per_point: self.ui.context.pixels_per_point(),
+            },
+            |context| {
+                egui::Window::new("UI").show(context, |ui| {
+                    ui.label(self.fps.to_string());
+                });
+            },
+        );
     }
 }
 
