@@ -14,7 +14,8 @@ path = "src/lib.rs"
 name = "point_cloud_lib"
 crate-type = ["cdylib", "rlib"]
 
-workspace = { members = ["point-converter"] }
+[workspace]
+members = ["point-converter"]
 
 [dependencies]
 wgpu = "0.19.3"

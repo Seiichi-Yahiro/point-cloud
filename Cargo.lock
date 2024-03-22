@@ -1285,6 +1285,7 @@ dependencies = [
  "caches",
  "glam",
  "log",
+ "rustc-hash",
 ]
 
 [[package]]

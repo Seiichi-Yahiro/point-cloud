@@ -1,9 +1,11 @@
 use std::fs::{create_dir, create_dir_all, File};
+use std::hash::BuildHasherDefault;
 use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use caches::{Cache, PutResult, RawLRU};
+use caches::{Cache, DefaultEvictCallback, PutResult, RawLRU};
 use glam::IVec3;
+use rustc_hash::FxHasher;
 
 use crate::cell::{Cell, CellAddPointError};
 use crate::metadata::{BoundingBox, Metadata};
@@ -12,7 +14,7 @@ use crate::point::Point;
 pub struct Converter {
     metadata: Metadata,
     working_directory: PathBuf,
-    cell_cache: RawLRU<CellId, Cell>,
+    cell_cache: RawLRU<CellId, Cell, DefaultEvictCallback, BuildHasherDefault<FxHasher>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -46,7 +48,7 @@ impl Converter {
         Self {
             metadata,
             working_directory: working_directory.to_path_buf(),
-            cell_cache: RawLRU::new(100).unwrap(), // TODO which capacity for LRU?
+            cell_cache: RawLRU::with_hasher(100, BuildHasherDefault::default()).unwrap(), // TODO which capacity for LRU?
         }
     }
 
