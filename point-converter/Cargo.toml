@@ -9,4 +9,4 @@ edition = "2021"
 glam = "0.26.0"
 log = "0.4.21"
 byteorder = "1.5.0"
-lfu = { path = "../lfu" }
+caches = "0.2.8"

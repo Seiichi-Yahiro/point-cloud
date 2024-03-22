@@ -2,9 +2,8 @@ use std::fs::{create_dir, create_dir_all, File};
 use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
+use caches::{Cache, PutResult, RawLRU};
 use glam::IVec3;
-
-use lfu::LFUCache;
 
 use crate::cell::{Cell, CellAddPointError};
 use crate::metadata::{BoundingBox, Metadata};
@@ -13,7 +12,7 @@ use crate::point::Point;
 pub struct Converter {
     metadata: Metadata,
     working_directory: PathBuf,
-    cell_cache: LFUCache<CellId, Cell>,
+    cell_cache: RawLRU<CellId, Cell>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -47,7 +46,7 @@ impl Converter {
         Self {
             metadata,
             working_directory: working_directory.to_path_buf(),
-            cell_cache: LFUCache::with_capacity(500).expect("Capacity should not be 0"), // TODO which capacity for LFU?
+            cell_cache: RawLRU::new(100).unwrap(), // TODO which capacity for LRU?
         }
     }
 
@@ -82,7 +81,11 @@ impl Converter {
         if !self.cell_cache.contains(&cell_id) {
             let cell = self.load_or_create_cell(&cell_id.path(&self.working_directory));
 
-            if let Some((old_cell_id, old_cell)) = self.cell_cache.set(cell_id, cell) {
+            if let PutResult::Evicted {
+                key: old_cell_id,
+                value: old_cell,
+            } = self.cell_cache.put(cell_id, cell)
+            {
                 Self::save_cell(&old_cell_id.path(&self.working_directory), &old_cell).unwrap();
             }
         }
@@ -123,7 +126,7 @@ impl Converter {
         }
     }
 
-    fn load_or_create_cell(&self, cell_path: &Path) -> Cell {
+    pub fn load_or_create_cell(&self, cell_path: &Path) -> Cell {
         match std::fs::read(cell_path) {
             Ok(bytes) => {
                 let mut cursor = Cursor::new(bytes);

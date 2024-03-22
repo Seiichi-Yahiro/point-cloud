@@ -18,7 +18,7 @@ impl Cell {
     pub fn new(capacity: usize) -> Self {
         Self {
             header: Header::new(capacity),
-            points: Vec::new(),
+            points: Vec::with_capacity(capacity),
             overflow_points: Vec::new(),
         }
     }
