@@ -13,7 +13,24 @@ use crate::point::Point;
 pub struct Converter {
     metadata: Metadata,
     working_directory: PathBuf,
-    cell_cache: LFUCache<PathBuf, Cell>,
+    cell_cache: LFUCache<CellId, Cell>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+struct CellId {
+    hierarchy: u32,
+    index: IVec3,
+}
+
+impl CellId {
+    fn path(&self, dir: &Path) -> PathBuf {
+        dir.join(format!("h_{}", self.hierarchy))
+            .join(format!(
+                "c_{}_{}_{}",
+                self.index.x, self.index.y, self.index.z
+            ))
+            .with_extension("bin")
+    }
 }
 
 impl Converter {
@@ -30,16 +47,8 @@ impl Converter {
         Self {
             metadata,
             working_directory: working_directory.to_path_buf(),
-            cell_cache: LFUCache::with_capacity(100).expect("Capacity should not be 0"), // TODO which capacity for LFU?
+            cell_cache: LFUCache::with_capacity(500).expect("Capacity should not be 0"), // TODO which capacity for LFU?
         }
-    }
-
-    fn hierarchy_dir_name(hierarchy: u32) -> String {
-        format!("h_{}", hierarchy)
-    }
-
-    fn cell_file_name(cell_index: IVec3) -> String {
-        format!("c_{}_{}_{}", cell_index.x, cell_index.y, cell_index.z)
     }
 
     pub fn add_point(&mut self, point: Point) {
@@ -52,14 +61,15 @@ impl Converter {
         let cell_index = (point.pos / cell_size).round().as_ivec3();
         let cell_pos = cell_index.as_vec3() * cell_size;
 
-        let hierarchy_dir = self
-            .working_directory
-            .join(Self::hierarchy_dir_name(hierarchy));
+        let cell_id = CellId {
+            hierarchy,
+            index: cell_index,
+        };
 
         if self.metadata.hierarchies <= hierarchy {
             self.metadata.hierarchies += 1;
 
-            if let Err(err) = create_dir(&hierarchy_dir) {
+            if let Err(err) = create_dir(cell_id.path(&self.working_directory).parent().unwrap()) {
                 match err.kind() {
                     ErrorKind::AlreadyExists => {}
                     _ => {
@@ -69,21 +79,17 @@ impl Converter {
             }
         }
 
-        let cell_path = hierarchy_dir
-            .join(Self::cell_file_name(cell_index))
-            .with_extension("bin");
+        if !self.cell_cache.contains(&cell_id) {
+            let cell = self.load_or_create_cell(&cell_id.path(&self.working_directory));
 
-        if !self.cell_cache.contains(&cell_path) {
-            let cell = self.load_or_create_cell(&cell_path);
-
-            if let Some((old_cell_path, old_cell)) = self.cell_cache.set(cell_path.clone(), cell) {
-                Self::save_cell(&old_cell_path, &old_cell).unwrap();
+            if let Some((old_cell_id, old_cell)) = self.cell_cache.set(cell_id, cell) {
+                Self::save_cell(&old_cell_id.path(&self.working_directory), &old_cell).unwrap();
             }
         }
 
         let cell = self
             .cell_cache
-            .get_mut(&cell_path)
+            .get_mut(&cell_id)
             .expect("Cell should have been inserted if it didn't exist");
 
         match cell.add_point(point, cell_size, cell_pos, &self.metadata) {
@@ -142,8 +148,8 @@ impl Converter {
     }
 
     fn save_cache(&self) -> Result<(), std::io::Error> {
-        for (cell_path, cell) in &self.cell_cache {
-            Self::save_cell(&cell_path, cell)?;
+        for (cell_id, cell) in &self.cell_cache {
+            Self::save_cell(&cell_id.path(&self.working_directory), cell)?;
         }
 
         Ok(())
@@ -163,7 +169,7 @@ impl Converter {
         Ok(())
     }
 
-    pub fn done(self) {
+    pub fn finish(self) {
         self.save_cache().unwrap();
         self.save_metadata().unwrap();
     }
