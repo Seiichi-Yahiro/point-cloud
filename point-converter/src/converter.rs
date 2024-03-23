@@ -4,7 +4,7 @@ use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use caches::{Cache, DefaultEvictCallback, PutResult, RawLRU};
-use glam::IVec3;
+use glam::{IVec3, Vec3};
 use rustc_hash::FxHasher;
 
 use crate::cell::{Cell, CellAddPointError};
@@ -40,7 +40,7 @@ impl Converter {
             match err.kind() {
                 ErrorKind::AlreadyExists => {}
                 _ => {
-                    panic!("{}", err);
+                    panic!("{:?}", err);
                 }
             }
         }
@@ -48,7 +48,7 @@ impl Converter {
         Self {
             metadata,
             working_directory: working_directory.to_path_buf(),
-            cell_cache: RawLRU::with_hasher(100, BuildHasherDefault::default()).unwrap(), // TODO which capacity for LRU?
+            cell_cache: RawLRU::with_hasher(100, BuildHasherDefault::default()).unwrap(),
         }
     }
 
@@ -74,14 +74,18 @@ impl Converter {
                 match err.kind() {
                     ErrorKind::AlreadyExists => {}
                     _ => {
-                        panic!("{}", err);
+                        panic!("{:?}", err);
                     }
                 }
             }
         }
 
         if !self.cell_cache.contains(&cell_id) {
-            let cell = self.load_or_create_cell(&cell_id.path(&self.working_directory));
+            let cell = self.load_or_create_cell(
+                &cell_id.path(&self.working_directory),
+                cell_size,
+                cell_pos,
+            );
 
             if let PutResult::Evicted {
                 key: old_cell_id,
@@ -97,13 +101,13 @@ impl Converter {
             .get_mut(&cell_id)
             .expect("Cell should have been inserted if it didn't exist");
 
-        match cell.add_point(point, cell_size, cell_pos, &self.metadata) {
+        match cell.add_point(point, &self.metadata) {
             Ok(_) => {
                 self.metadata.number_of_points += 1;
                 self.update_bounding_box(point);
             }
-            Err(CellAddPointError::PointLimitReached) => {
-                let overflow = cell.extract_and_close_overflow();
+            Err(CellAddPointError::OverflowLimitReached) => {
+                let overflow = cell.apply_grid_and_extract_overflow(&self.metadata);
 
                 // subtract points or they will be counted twice
                 self.metadata.number_of_points -= overflow.len() as u64;
@@ -114,7 +118,8 @@ impl Converter {
 
                 self.add_point_in_hierarchy(point, hierarchy + 1);
             }
-            Err(CellAddPointError::GridPositionOccupied) => {
+            Err(CellAddPointError::GridPositionOccupied)
+            | Err(CellAddPointError::PointLimitReached) => {
                 self.add_point_in_hierarchy(point, hierarchy + 1);
             }
         }
@@ -128,16 +133,24 @@ impl Converter {
         }
     }
 
-    pub fn load_or_create_cell(&self, cell_path: &Path) -> Cell {
-        match std::fs::read(cell_path) {
-            Ok(bytes) => {
-                let mut cursor = Cursor::new(bytes);
-                Cell::read_from(&mut cursor, &self.metadata).unwrap()
-            }
+    pub fn load_cell(&self, cell_path: &Path) -> Result<Cell, std::io::Error> {
+        std::fs::read(cell_path).and_then(|bytes| {
+            let mut cursor = Cursor::new(bytes);
+            Cell::read_from(&mut cursor, &self.metadata)
+        })
+    }
+
+    fn load_or_create_cell(&self, cell_path: &Path, cell_size: f32, cell_pos: Vec3) -> Cell {
+        match self.load_cell(cell_path) {
+            Ok(cell) => cell,
             Err(err) => match err.kind() {
-                ErrorKind::NotFound => Cell::new(self.metadata.number_of_sub_grid_cells() as usize),
+                ErrorKind::NotFound => Cell::new(
+                    self.metadata.number_of_sub_grid_cells() as usize,
+                    cell_size,
+                    cell_pos,
+                ),
                 _ => {
-                    panic!("{}", err);
+                    panic!("{:?}", err);
                 }
             },
         }

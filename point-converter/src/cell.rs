@@ -1,9 +1,10 @@
+use std::hash::BuildHasherDefault;
 use std::io::{Read, Write};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use glam::{UVec3, Vec3};
+use rustc_hash::FxHashSet;
 
-use crate::bits::Bits;
 use crate::metadata::Metadata;
 use crate::point::Point;
 
@@ -11,15 +12,15 @@ use crate::point::Point;
 pub struct Cell {
     header: Header,
     points: Vec<Point>,
-    overflow_points: Vec<Point>,
+    grid: Option<FxHashSet<u32>>,
 }
 
 impl Cell {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, size: f32, pos: Vec3) -> Self {
         Self {
-            header: Header::new(capacity),
+            header: Header::new(size, pos),
             points: Vec::with_capacity(capacity),
-            overflow_points: Vec::new(),
+            grid: None,
         }
     }
 
@@ -31,49 +32,63 @@ impl Cell {
         &self.points
     }
 
-    pub fn overflow_points(&self) -> &[Point] {
-        &self.overflow_points
-    }
-
     pub fn add_point(
         &mut self,
         point: Point,
-        cell_size: f32,
-        cell_pos: Vec3,
         metadata: &Metadata,
     ) -> Result<(), CellAddPointError> {
-        let sub_cell_size = cell_size / metadata.sub_grid_dimension as f32;
-        let offset = point.pos - cell_pos + cell_size / 2.0;
+        if let Some(grid) = &mut self.grid {
+            if (self.points.len() as u32) >= metadata.cell_point_limit {
+                return Err(CellAddPointError::PointLimitReached);
+            }
 
-        let sub_cell_id = (offset / sub_cell_size)
-            .as_uvec3()
-            .min(UVec3::splat(metadata.sub_grid_dimension - 1)); // TODO why is min needed? precision problem? or bug?
-        let linear_sub_cell_id = sub_cell_id.x
-            + sub_cell_id.y * metadata.sub_grid_dimension
-            + sub_cell_id.z * metadata.sub_grid_dimension.pow(2);
+            let sub_grid_index = self
+                .header
+                .sub_grid_index_for_point(point, metadata.sub_grid_dimension);
 
-        if self.header.grid.set_bit(linear_sub_cell_id as usize) {
-            self.header.number_of_points += 1;
-            self.points.push(point);
-
-            Ok(())
-        } else if let Some(overflow) = &mut self.header.overflow {
-            if *overflow < metadata.cell_point_overflow_limit {
-                *overflow += 1;
-                self.overflow_points.push(point);
+            if grid.insert(sub_grid_index) {
+                self.points.push(point);
+                self.header.number_of_points += 1;
 
                 Ok(())
             } else {
-                Err(CellAddPointError::PointLimitReached)
+                Err(CellAddPointError::GridPositionOccupied)
             }
+        } else if (self.points.len() as u32)
+            < metadata.cell_point_limit + metadata.cell_point_overflow_limit
+        {
+            self.points.push(point);
+            self.header.number_of_points += 1;
+
+            Ok(())
         } else {
-            Err(CellAddPointError::GridPositionOccupied)
+            Err(CellAddPointError::OverflowLimitReached)
         }
     }
 
-    pub fn extract_and_close_overflow(&mut self) -> Vec<Point> {
-        self.header.overflow = None;
-        std::mem::take(&mut self.overflow_points)
+    pub fn apply_grid_and_extract_overflow(&mut self, metadata: &Metadata) -> Vec<Point> {
+        let mut grid = FxHashSet::with_capacity_and_hasher(
+            self.points.len() / 2,
+            BuildHasherDefault::default(),
+        );
+
+        let (points, overflow) = std::mem::take(&mut self.points)
+            .into_iter()
+            .partition(|point| {
+                let sub_grid_index = self
+                    .header
+                    .sub_grid_index_for_point(*point, metadata.sub_grid_dimension);
+
+                grid.insert(sub_grid_index)
+            });
+
+        self.points = points;
+        self.header.number_of_points -= overflow.len() as u32;
+
+        self.grid = Some(grid);
+        self.header.has_grid = true;
+
+        overflow
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
@@ -83,49 +98,54 @@ impl Cell {
             point.write_to(writer)?;
         }
 
-        if self.header.overflow.is_some() {
-            for point in &self.overflow_points {
-                point.write_to(writer)?;
-            }
-        }
-
         Ok(())
     }
 
     pub fn read_from(reader: &mut dyn Read, metadata: &Metadata) -> Result<Self, std::io::Error> {
-        let header = Header::read_from(reader, metadata)?;
+        let header = Header::read_from(reader)?;
 
         let mut points = Vec::with_capacity(header.number_of_points as usize);
 
-        for _ in 0..header.number_of_points {
-            let point = Point::read_from(reader)?;
-            points.push(point);
-        }
+        let grid = if header.has_grid {
+            let mut grid = FxHashSet::with_capacity_and_hasher(
+                header.number_of_points as usize,
+                BuildHasherDefault::default(),
+            );
 
-        let overflow_points = if let Some(overflow) = header.overflow {
-            let mut points = Vec::with_capacity(overflow as usize);
+            for _ in 0..header.number_of_points {
+                let point = Point::read_from(reader)?;
+                let sub_grid_index =
+                    header.sub_grid_index_for_point(point, metadata.sub_grid_dimension);
 
-            for _ in 0..overflow {
+                grid.insert(sub_grid_index);
+                points.push(point);
+            }
+
+            Some(grid)
+        } else {
+            for _ in 0..header.number_of_points {
                 let point = Point::read_from(reader)?;
                 points.push(point);
             }
 
-            points
-        } else {
-            Vec::new()
+            None
         };
 
         Ok(Self {
             header,
+            grid,
             points,
-            overflow_points,
         })
     }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CellAddPointError {
+    /// The cell is full.
     PointLimitReached,
+    /// The cell is overflowing and needs to reduce points.
+    OverflowLimitReached,
+    /// The grid cell was already occupied by another point.
     GridPositionOccupied,
 }
 
@@ -134,53 +154,63 @@ pub struct Header {
     /// Number of points in this cell.
     number_of_points: u32,
 
-    /// When some then number of points overflowing this cell.
-    /// When none then there is no overflow.
-    overflow: Option<u32>,
+    /// Does a grid exists?
+    has_grid: bool,
 
-    /// Grid-bit-mask that signifies if a point exists at a grid location.
-    grid: Bits,
+    /// The side length of the cubic cell.
+    size: f32,
+
+    /// The position of the cell in the world.
+    pos: Vec3,
 }
 
 impl Header {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(size: f32, pos: Vec3) -> Self {
         Self {
             number_of_points: 0,
-            overflow: Some(0),
-            grid: Bits::new(capacity),
+            has_grid: false,
+            size,
+            pos,
         }
+    }
+
+    fn sub_grid_index_for_point(&self, point: Point, sub_grid_dimension: u32) -> u32 {
+        let sub_cell_size = self.size / sub_grid_dimension as f32;
+        let offset = point.pos - self.pos + self.size / 2.0;
+
+        let sub_cell_id = (offset / sub_cell_size)
+            .as_uvec3()
+            .min(UVec3::splat(sub_grid_dimension - 1)); // TODO why is min needed? precision problem? or bug?
+
+        sub_cell_id.x
+            + sub_cell_id.y * sub_grid_dimension
+            + sub_cell_id.z * sub_grid_dimension.pow(2)
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
         writer.write_u32::<BigEndian>(self.number_of_points)?;
+        writer.write_u8(self.has_grid as u8)?;
+        writer.write_f32::<BigEndian>(self.size)?;
+        writer.write_f32::<BigEndian>(self.pos.x)?;
+        writer.write_f32::<BigEndian>(self.pos.y)?;
+        writer.write_f32::<BigEndian>(self.pos.z)?;
 
-        if let Some(overflow) = self.overflow {
-            writer.write_u8(1)?;
-            writer.write_u32::<BigEndian>(overflow)?;
-        } else {
-            writer.write_u8(0)?;
-        }
-
-        self.grid.write_to(writer)?;
         Ok(())
     }
 
-    pub fn read_from(reader: &mut dyn Read, metadata: &Metadata) -> Result<Self, std::io::Error> {
+    pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
         let number_of_points = reader.read_u32::<BigEndian>()?;
-
-        let has_over_flow = reader.read_u8()? != 0;
-        let overflow = if has_over_flow {
-            Some(reader.read_u32::<BigEndian>()?)
-        } else {
-            None
-        };
-
-        let grid = Bits::read_from(reader, metadata.number_of_sub_grid_cells() as usize)?;
+        let has_grid = reader.read_u8()? != 0;
+        let size = reader.read_f32::<BigEndian>()?;
+        let x = reader.read_f32::<BigEndian>()?;
+        let y = reader.read_f32::<BigEndian>()?;
+        let z = reader.read_f32::<BigEndian>()?;
 
         Ok(Self {
             number_of_points,
-            overflow,
-            grid,
+            has_grid,
+            size,
+            pos: Vec3::new(x, y, z),
         })
     }
 }

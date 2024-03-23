@@ -13,6 +13,9 @@ pub struct Metadata {
     /// Number of existing hierarchy levels.
     pub hierarchies: u32,
 
+    /// Number of points a cell can hold.
+    pub cell_point_limit: u32,
+
     /// Number of points a cell can hold additionally before creating new cells in the next lower
     /// hierarchy level.
     pub cell_point_overflow_limit: u32,
@@ -36,6 +39,7 @@ impl Metadata {
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
         writer.write_u64::<BigEndian>(self.number_of_points)?;
         writer.write_u32::<BigEndian>(self.hierarchies)?;
+        writer.write_u32::<BigEndian>(self.cell_point_limit)?;
         writer.write_u32::<BigEndian>(self.cell_point_overflow_limit)?;
         writer.write_u32::<BigEndian>(self.sub_grid_dimension)?;
         writer.write_f32::<BigEndian>(self.max_cell_size)?;
@@ -47,6 +51,7 @@ impl Metadata {
     pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
         let number_of_points = reader.read_u64::<BigEndian>()?;
         let hierarchies = reader.read_u32::<BigEndian>()?;
+        let cell_point_limit = reader.read_u32::<BigEndian>()?;
         let cell_point_overflow_limit = reader.read_u32::<BigEndian>()?;
         let sub_grid_dimension = reader.read_u32::<BigEndian>()?;
         let max_cell_size = reader.read_f32::<BigEndian>()?;
@@ -55,6 +60,7 @@ impl Metadata {
         Ok(Self {
             number_of_points,
             hierarchies,
+            cell_point_limit,
             cell_point_overflow_limit,
             sub_grid_dimension,
             max_cell_size,
@@ -70,8 +76,9 @@ impl Default for Metadata {
             max_cell_size: 1000.0,
             hierarchies: 0,
             bounding_box: BoundingBox::default(),
-            sub_grid_dimension: 48,
+            sub_grid_dimension: 128,
             cell_point_overflow_limit: 30_000,
+            cell_point_limit: 100_000,
         }
     }
 }
