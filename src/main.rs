@@ -1,5 +1,5 @@
-use point_cloud_lib::App;
+use point_cloud_lib::run;
 
 fn main() {
-    pollster::block_on(App::run());
+    pollster::block_on(run());
 }
