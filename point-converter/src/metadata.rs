@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use glam::Vec3;
+use serde::{Deserialize, Serialize};
 
 use crate::point::Point;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
     /// Total number of points.
     pub number_of_points: u64,
@@ -36,36 +36,12 @@ impl Metadata {
         self.sub_grid_dimension.pow(3)
     }
 
-    pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
-        writer.write_u64::<BigEndian>(self.number_of_points)?;
-        writer.write_u32::<BigEndian>(self.hierarchies)?;
-        writer.write_u32::<BigEndian>(self.cell_point_limit)?;
-        writer.write_u32::<BigEndian>(self.cell_point_overflow_limit)?;
-        writer.write_u32::<BigEndian>(self.sub_grid_dimension)?;
-        writer.write_f32::<BigEndian>(self.max_cell_size)?;
-        self.bounding_box.write_to(writer)?;
-
-        Ok(())
+    pub fn write_to(&self, writer: &mut dyn Write) -> serde_json::Result<()> {
+        serde_json::to_writer_pretty(writer, self)
     }
 
-    pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
-        let number_of_points = reader.read_u64::<BigEndian>()?;
-        let hierarchies = reader.read_u32::<BigEndian>()?;
-        let cell_point_limit = reader.read_u32::<BigEndian>()?;
-        let cell_point_overflow_limit = reader.read_u32::<BigEndian>()?;
-        let sub_grid_dimension = reader.read_u32::<BigEndian>()?;
-        let max_cell_size = reader.read_f32::<BigEndian>()?;
-        let bounding_box = BoundingBox::read_from(reader)?;
-
-        Ok(Self {
-            number_of_points,
-            hierarchies,
-            cell_point_limit,
-            cell_point_overflow_limit,
-            sub_grid_dimension,
-            max_cell_size,
-            bounding_box,
-        })
+    pub fn read_from(reader: &mut dyn Read) -> serde_json::Result<Self> {
+        serde_json::from_reader(reader)
     }
 }
 
@@ -83,7 +59,7 @@ impl Default for Metadata {
     }
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 /// A 3D Bounding box with min max values .
 pub struct BoundingBox {
     pub min: Vec3,
@@ -99,32 +75,5 @@ impl BoundingBox {
     pub fn extend(&mut self, point: Point) {
         self.min = self.min.min(point.pos);
         self.max = self.max.max(point.pos);
-    }
-
-    pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
-        writer.write_f32::<BigEndian>(self.min.x)?;
-        writer.write_f32::<BigEndian>(self.min.y)?;
-        writer.write_f32::<BigEndian>(self.min.z)?;
-
-        writer.write_f32::<BigEndian>(self.max.x)?;
-        writer.write_f32::<BigEndian>(self.max.y)?;
-        writer.write_f32::<BigEndian>(self.max.z)?;
-
-        Ok(())
-    }
-
-    pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
-        let x_min = reader.read_f32::<BigEndian>()?;
-        let y_min = reader.read_f32::<BigEndian>()?;
-        let z_min = reader.read_f32::<BigEndian>()?;
-
-        let x_max = reader.read_f32::<BigEndian>()?;
-        let y_max = reader.read_f32::<BigEndian>()?;
-        let z_max = reader.read_f32::<BigEndian>()?;
-
-        Ok(Self {
-            min: Vec3::new(x_min, y_min, z_min),
-            max: Vec3::new(x_max, y_max, z_max),
-        })
     }
 }

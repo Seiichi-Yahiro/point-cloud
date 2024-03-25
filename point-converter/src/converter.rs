@@ -177,7 +177,7 @@ impl Converter {
         let path = self
             .working_directory
             .join("metadata")
-            .with_extension("bin");
+            .with_extension("json");
 
         let file = File::create(path)?;
         let mut buf_writer = BufWriter::new(file);
