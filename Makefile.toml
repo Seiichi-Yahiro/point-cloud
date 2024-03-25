@@ -4,6 +4,18 @@
 # run with:
 # cargo make <task name>
 
+[config]
+default_to_workspace = false
+
+[tasks.debug]
+env = { "RUST_LOG" = "point_cloud=debug,wgpu=warn" }
+command = "cargo"
+args = [
+    "run",
+    "--package", "point-cloud",
+    "--bin", "point_cloud"
+]
+
 [tasks.release]
 env = { "RUST_LOG" = "point_cloud=debug,wgpu=warn" }
 command = "cargo"
