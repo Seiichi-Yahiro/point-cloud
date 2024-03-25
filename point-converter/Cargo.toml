@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glam = "0.26.0"
+glam = "0.27.0"
 log = "0.4.21"
 byteorder = "1.5.0"
 caches = "0.2.8"
