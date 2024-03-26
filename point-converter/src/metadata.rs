@@ -8,6 +8,12 @@ use crate::point::Point;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
+    /// The current version of this metadata file.
+    pub version: String,
+
+    /// The name of the point cloud.
+    pub name: String,
+
     /// Total number of points.
     pub number_of_points: u64,
 
@@ -65,6 +71,8 @@ impl Metadata {
 impl Default for Metadata {
     fn default() -> Self {
         Self {
+            version: "1.0".to_string(),
+            name: "Unknown".to_string(),
             number_of_points: 0,
             max_cell_size: 1000.0,
             hierarchies: 0,

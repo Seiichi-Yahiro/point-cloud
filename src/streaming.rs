@@ -72,7 +72,7 @@ impl CellStreamer for LocalCellStreamer {
 
         std::thread::spawn(move || match Metadata::from_path(path) {
             Ok(metadata) => {
-                log::info!("Loaded metadata");
+                log::info!("Loaded metadata for {}", metadata.name);
                 sender.send(LoadedFile::Metadata(metadata)).unwrap();
             }
             Err(err) => {
@@ -103,7 +103,7 @@ impl CellStreamer for LocalCellStreamer {
 
             match Metadata::read_from(&mut cursor) {
                 Ok(metadata) => {
-                    log::info!("Loaded metadata");
+                    log::info!("Loaded metadata for {}", metadata.name);
                     sender.send(LoadedFile::Metadata(metadata)).unwrap();
                 }
                 Err(err) => {
