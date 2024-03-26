@@ -156,6 +156,10 @@ impl PointRenderer {
         }
     }
 
+    pub fn camera(&self) -> &Camera {
+        self.camera_controller.camera()
+    }
+
     pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
         self.camera_controller.camera_mut().projection.aspect_ratio =
             config.width as f32 / config.height as f32;

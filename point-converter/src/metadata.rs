@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::path::Path;
 
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,22 @@ impl Metadata {
 
     pub fn read_from(reader: &mut dyn Read) -> serde_json::Result<Self> {
         serde_json::from_reader(reader)
+    }
+
+    pub fn from_path<T: AsRef<Path>>(path: T) -> serde_json::Result<Self> {
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(err) => {
+                use serde::de::Error;
+                return Err(serde_json::Error::custom(format!(
+                    "Failed to open file: {}",
+                    err
+                )));
+            }
+        };
+
+        let buf_reader = std::io::BufReader::new(file);
+        serde_json::from_reader(buf_reader)
     }
 }
 
