@@ -230,17 +230,18 @@ impl App {
 
                             wasm_bindgen_futures::spawn_local(async move {
                                 use wasm_bindgen::JsCast;
-                                let dir = crate::web::chooseDir()
-                                    .await
-                                    .unwrap()
-                                    .dyn_into::<web_sys::FileSystemDirectoryHandle>()
-                                    .unwrap();
 
-                                event_loop_proxy
-                                    .send_event(UserEvent::ChangeCellStreamer(Box::new(
-                                        LocalCellStreamer::new(dir),
-                                    )))
-                                    .unwrap();
+                                if let Ok(dir) = crate::web::chooseDir().await {
+                                    let dir = dir
+                                        .dyn_into::<web_sys::FileSystemDirectoryHandle>()
+                                        .unwrap();
+
+                                    event_loop_proxy
+                                        .send_event(UserEvent::ChangeCellStreamer(Box::new(
+                                            LocalCellStreamer::new(dir),
+                                        )))
+                                        .unwrap();
+                                }
                             });
                         }
                     });
