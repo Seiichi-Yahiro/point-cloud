@@ -1756,6 +1756,7 @@ name = "point-cloud"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "caches",
  "cfg-if",
  "console_error_panic_hook",
  "console_log",
@@ -1765,11 +1766,13 @@ dependencies = [
  "env_logger",
  "flume",
  "glam",
+ "itertools",
  "js-sys",
  "log",
  "point-converter",
  "pollster",
  "rfd",
+ "rustc-hash",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

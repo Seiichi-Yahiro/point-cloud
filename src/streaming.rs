@@ -1,6 +1,12 @@
 use std::fmt::Debug;
+use std::hash::BuildHasherDefault;
+use std::io::ErrorKind;
 
+use caches::{Cache, DefaultEvictCallback, RawLRU};
 use flume::{RecvError, TryRecvError};
+use glam::IVec3;
+use itertools::Itertools;
+use rustc_hash::FxHasher;
 
 use point_converter::cell::{Cell, CellId};
 use point_converter::metadata::Metadata;
@@ -19,7 +25,7 @@ enum LoadFile {
 
 enum LoadedFile {
     Metadata(Metadata),
-    Cell(Cell),
+    Cell { id: CellId, cell: Option<Cell> },
 }
 
 pub trait CellStreamer: Debug {
@@ -54,12 +60,19 @@ type WorkingDir = std::path::PathBuf;
 type WorkingDir = web_sys::FileSystemDirectoryHandle;
 
 #[derive(Debug)]
+enum CellStatus {
+    Loading,
+    Loaded(Cell),
+    Missing,
+}
+
+#[derive(Debug)]
 pub struct LocalCellStreamer {
     working_dir: WorkingDir,
     metadata: Option<Metadata>,
-    cells: Vec<Cell>,
     load_sender: flume::Sender<LoadFile>,
     loaded_receiver: flume::Receiver<LoadedFile>,
+    cells: RawLRU<CellId, CellStatus, DefaultEvictCallback, BuildHasherDefault<FxHasher>>,
 }
 
 impl LocalCellStreamer {
@@ -72,7 +85,7 @@ impl LocalCellStreamer {
         Self {
             working_dir,
             metadata: None,
-            cells: Vec::new(),
+            cells: RawLRU::with_hasher(200, BuildHasherDefault::default()).unwrap(),
             load_sender,
             loaded_receiver,
         }
@@ -112,14 +125,27 @@ impl LocalCellStreamer {
                         Ok(cell) => {
                             log::debug!("Loaded cell {:?}", id);
 
-                            if let Err(err) = sender.send(LoadedFile::Cell(cell)) {
+                            if let Err(err) = sender.send(LoadedFile::Cell {
+                                cell: Some(cell),
+                                id,
+                            }) {
                                 log::error!("{:?}", err);
                                 return;
                             }
                         }
-                        Err(err) => {
-                            log::error!("Failed to load cell {:?}: {:?}", id, err);
-                        }
+                        Err(err) => match err.kind() {
+                            ErrorKind::NotFound => {
+                                log::warn!("Couldn't find cell {:?}", id);
+
+                                if let Err(err) = sender.send(LoadedFile::Cell { cell: None, id }) {
+                                    log::error!("{:?}", err);
+                                    return;
+                                }
+                            }
+                            _ => {
+                                log::error!("Failed to load cell {:?}: {:?}", id, err);
+                            }
+                        },
                     }
                 }
                 Ok(LoadFile::Stop) => {
@@ -144,26 +170,14 @@ impl LocalCellStreamer {
             loop {
                 match receiver.recv_async().await {
                     Ok(LoadFile::Metadata(working_dir)) => {
-                        let array_buffer =
-                            match crate::web::readBytes(&working_dir, "metadata.json").await {
-                                Ok(buffer) => buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap(),
-                                Err(err) => {
-                                    log::error!("Failed to load metadata {:?}", err);
-                                    continue;
-                                }
-                            };
+                        let result = Self::load_metadata(working_dir).await.and_then(|metadata| {
+                            sender
+                                .send(LoadedFile::Metadata(metadata))
+                                .map_err(|err| js_sys::Error::new(&err.to_string()))
+                        });
 
-                        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
-                        let mut cursor = std::io::Cursor::new(bytes);
-
-                        match Metadata::read_from(&mut cursor) {
-                            Ok(metadata) => {
-                                log::info!("Loaded metadata for {}", metadata.name);
-                                sender.send(LoadedFile::Metadata(metadata)).unwrap();
-                            }
-                            Err(err) => {
-                                log::error!("Failed to load metadata: {:?}", err);
-                            }
+                        if let Err(err) = result {
+                            log::error!("Failed to load metadata: {:?}", err);
                         }
                     }
                     Ok(LoadFile::Cell {
@@ -171,32 +185,26 @@ impl LocalCellStreamer {
                         sub_grid_dimension,
                         working_dir,
                     }) => {
-                        let [hierarchy_dir, file_name] = id.path();
+                        let result = Self::load_cell(id, sub_grid_dimension, working_dir)
+                            .await
+                            .and_then(|cell| {
+                                sender
+                                    .send(LoadedFile::Cell {
+                                        cell: Some(cell),
+                                        id,
+                                    })
+                                    .map_err(|err| js_sys::Error::new(&err.to_string()))
+                            });
 
-                        let array_buffer =
-                            match crate::web::readCell(&working_dir, &hierarchy_dir, &file_name)
-                                .await
-                            {
-                                Ok(buffer) => buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap(),
-                                Err(err) => {
-                                    log::error!("Failed to load cell {:?}: {:?}", id, err);
-                                    continue;
-                                }
-                            };
+                        if let Err(err) = result {
+                            if err.name() == "NotFoundError" {
+                                log::warn!("Couldn't find cell {:?}", id);
 
-                        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
-                        let mut cursor = std::io::Cursor::new(bytes);
-
-                        match Cell::read_from(&mut cursor, sub_grid_dimension) {
-                            Ok(cell) => {
-                                log::debug!("Loaded cell {:?}", id);
-
-                                if let Err(err) = sender.send(LoadedFile::Cell(cell)) {
+                                if let Err(err) = sender.send(LoadedFile::Cell { cell: None, id }) {
                                     log::error!("{:?}", err);
                                     return;
                                 }
-                            }
-                            Err(err) => {
+                            } else {
                                 log::error!("Failed to load cell {:?}: {:?}", id, err);
                             }
                         }
@@ -212,6 +220,48 @@ impl LocalCellStreamer {
                 }
             }
         });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn load_metadata(working_dir: WorkingDir) -> Result<Metadata, js_sys::Error> {
+        use wasm_bindgen::JsCast;
+
+        let buffer = crate::web::readBytes(&working_dir, "metadata.json").await?;
+        let array_buffer = buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap();
+
+        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
+        let mut cursor = std::io::Cursor::new(bytes);
+
+        let metadata =
+            Metadata::read_from(&mut cursor).map_err(|err| js_sys::Error::new(&err.to_string()))?;
+
+        log::info!("Loaded metadata for {}", metadata.name);
+
+        Ok(metadata)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn load_cell(
+        id: CellId,
+        sub_grid_dimension: u32,
+        working_dir: WorkingDir,
+    ) -> Result<Cell, js_sys::Error> {
+        use wasm_bindgen::JsCast;
+
+        let [hierarchy_dir, file_name] = id.path();
+
+        let buffer = crate::web::readCell(&working_dir, &hierarchy_dir, &file_name).await?;
+        let array_buffer = buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap();
+
+        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
+        let mut cursor = std::io::Cursor::new(bytes);
+
+        let cell = Cell::read_from(&mut cursor, sub_grid_dimension)
+            .map_err(|err| js_sys::Error::new(&err.to_string()))?;
+
+        log::debug!("Loaded cell {:?}", id);
+
+        Ok(cell)
     }
 }
 
@@ -258,13 +308,54 @@ impl CellStreamer for LocalCellStreamer {
             Ok(LoadedFile::Metadata(metadata)) => {
                 self.metadata = Some(metadata);
             }
-            Ok(LoadedFile::Cell(cell)) => {
-                self.cells.push(cell);
+            Ok(LoadedFile::Cell { id, cell }) => {
+                let cell_status = cell.map(CellStatus::Loaded).unwrap_or(CellStatus::Missing);
+                self.cells.put(id, cell_status);
             }
             Err(TryRecvError::Disconnected) => {
                 panic!("Failed to stream files as the sender was dropped");
             }
             Err(TryRecvError::Empty) => {}
         }
+
+        if let Some(metadata) = &self.metadata {
+            for cell_id in get_cells_to_load(metadata, camera, 0) {
+                if self.cells.get(&cell_id).is_some() {
+                    continue;
+                }
+
+                self.cells.put(cell_id, CellStatus::Loading);
+                self.load_cell(cell_id);
+            }
+        }
     }
+}
+
+fn get_cells_to_load(
+    metadata: &Metadata,
+    camera: &Camera,
+    hierarchy: u32,
+) -> impl Iterator<Item = CellId> {
+    let far = camera.projection.far / 2u32.pow(hierarchy) as f32;
+    let fov_y = camera.projection.fov_y;
+    let aspect_ratio = camera.projection.aspect_ratio;
+
+    let half_height_far = far * (fov_y * 0.5).tan();
+    let half_width_far = half_height_far * aspect_ratio;
+
+    let far_radius =
+        ((half_width_far * 2.0).powi(2) + (half_height_far * 2.0).powi(2)).sqrt() / 2.0;
+
+    let radius = far_radius.max(far / 2.0) * 1.2;
+    let pos = camera.transform.translation + camera.transform.forward() * radius / 2.0;
+
+    let cell_size = metadata.cell_size(hierarchy);
+    let min_cell_index = metadata.cell_index(pos - radius, cell_size);
+    let max_cell_index = metadata.cell_index(pos + radius, cell_size);
+
+    (min_cell_index.x..=max_cell_index.x)
+        .cartesian_product(min_cell_index.y..=max_cell_index.y)
+        .cartesian_product(min_cell_index.z..=max_cell_index.z)
+        .map(|((x, y), z)| IVec3::new(x, y, z))
+        .map(move |index| CellId { index, hierarchy })
 }
