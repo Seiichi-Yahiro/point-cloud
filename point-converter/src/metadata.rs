@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use glam::Vec3;
+use glam::{IVec3, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::point::Point;
@@ -41,6 +41,14 @@ pub struct Metadata {
 impl Metadata {
     pub fn number_of_sub_grid_cells(&self) -> u32 {
         self.sub_grid_dimension.pow(3)
+    }
+
+    pub fn cell_size(&self, hierarchy: u32) -> f32 {
+        self.max_cell_size / 2u32.pow(hierarchy) as f32
+    }
+
+    pub fn cell_index(&self, pos: Vec3, cell_size: f32) -> IVec3 {
+        (pos / cell_size).round().as_ivec3()
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> serde_json::Result<()> {

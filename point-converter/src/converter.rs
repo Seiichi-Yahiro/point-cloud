@@ -4,10 +4,10 @@ use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use caches::{Cache, DefaultEvictCallback, PutResult, RawLRU};
-use glam::{IVec3, Vec3};
+use glam::Vec3;
 use rustc_hash::FxHasher;
 
-use crate::cell::{Cell, CellAddPointError};
+use crate::cell::{Cell, CellAddPointError, CellId};
 use crate::metadata::{BoundingBox, Metadata};
 use crate::point::Point;
 
@@ -15,23 +15,6 @@ pub struct Converter {
     metadata: Metadata,
     working_directory: PathBuf,
     cell_cache: RawLRU<CellId, Cell, DefaultEvictCallback, BuildHasherDefault<FxHasher>>,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-struct CellId {
-    hierarchy: u32,
-    index: IVec3,
-}
-
-impl CellId {
-    fn path(&self, dir: &Path) -> PathBuf {
-        dir.join(format!("h_{}", self.hierarchy))
-            .join(format!(
-                "c_{}_{}_{}",
-                self.index.x, self.index.y, self.index.z
-            ))
-            .with_extension("bin")
-    }
 }
 
 impl Converter {
@@ -57,9 +40,8 @@ impl Converter {
     }
 
     fn add_point_in_hierarchy(&mut self, point: Point, hierarchy: u32) {
-        let cell_size = self.metadata.max_cell_size / 2u32.pow(hierarchy) as f32;
-
-        let cell_index = (point.pos / cell_size).round().as_ivec3();
+        let cell_size = self.metadata.cell_size(hierarchy);
+        let cell_index = self.metadata.cell_index(point.pos, cell_size);
         let cell_pos = cell_index.as_vec3() * cell_size;
 
         let cell_id = CellId {
@@ -136,7 +118,7 @@ impl Converter {
     pub fn load_cell(&self, cell_path: &Path) -> Result<Cell, std::io::Error> {
         std::fs::read(cell_path).and_then(|bytes| {
             let mut cursor = Cursor::new(bytes);
-            Cell::read_from(&mut cursor, &self.metadata)
+            Cell::read_from(&mut cursor, self.metadata.sub_grid_dimension)
         })
     }
 

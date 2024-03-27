@@ -1,12 +1,49 @@
 use std::hash::BuildHasherDefault;
 use std::io::{Read, Write};
+use std::path::Path;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use glam::{UVec3, Vec3};
+use glam::{IVec3, UVec3, Vec3};
 use rustc_hash::FxHashSet;
 
 use crate::metadata::Metadata;
 use crate::point::Point;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct CellId {
+    pub hierarchy: u32,
+    pub index: IVec3,
+}
+
+impl CellId {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn path(&self, working_dir: &Path) -> std::path::PathBuf {
+        working_dir
+            .join(self.hierarchy_string())
+            .join(self.index_string())
+            .with_extension(self.extension())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn path(&self) -> [String; 2] {
+        [
+            self.hierarchy_string(),
+            format!("{}.{}", self.index_string(), self.extension()),
+        ]
+    }
+
+    pub fn hierarchy_string(&self) -> String {
+        format!("h_{}", self.hierarchy)
+    }
+
+    pub fn index_string(&self) -> String {
+        format!("c_{}_{}_{}", self.index.x, self.index.y, self.index.z)
+    }
+
+    pub fn extension(&self) -> &str {
+        "bin"
+    }
+}
 
 #[derive(Debug)]
 pub struct Cell {
@@ -101,7 +138,10 @@ impl Cell {
         Ok(())
     }
 
-    pub fn read_from(reader: &mut dyn Read, metadata: &Metadata) -> Result<Self, std::io::Error> {
+    pub fn read_from(
+        reader: &mut dyn Read,
+        sub_grid_dimension: u32,
+    ) -> Result<Self, std::io::Error> {
         let header = Header::read_from(reader)?;
 
         let mut points = Vec::with_capacity(header.number_of_points as usize);
@@ -114,8 +154,7 @@ impl Cell {
 
             for _ in 0..header.number_of_points {
                 let point = Point::read_from(reader)?;
-                let sub_grid_index =
-                    header.sub_grid_index_for_point(point, metadata.sub_grid_dimension);
+                let sub_grid_index = header.sub_grid_index_for_point(point, sub_grid_dimension);
 
                 grid.insert(sub_grid_index);
                 points.push(point);
@@ -136,6 +175,15 @@ impl Cell {
             grid,
             points,
         })
+    }
+
+    pub fn from_path<T: AsRef<Path>>(
+        path: T,
+        sub_grid_dimension: u32,
+    ) -> Result<Self, std::io::Error> {
+        let file = std::fs::File::open(path)?;
+        let mut buf_reader = std::io::BufReader::new(file);
+        Self::read_from(&mut buf_reader, sub_grid_dimension)
     }
 }
 
