@@ -1,6 +1,18 @@
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug)]
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::Resource;
+
+pub struct FPSPlugin;
+
+impl Plugin for FPSPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(FPS::new()).add_systems(Update, update);
+    }
+}
+
+#[derive(Debug, Resource)]
 pub struct FPS {
     #[cfg(not(target_arch = "wasm32"))]
     last_second: std::time::Instant,
@@ -19,7 +31,7 @@ impl Display for FPS {
 }
 
 impl FPS {
-    pub fn new() -> Self {
+    fn new() -> Self {
         FPS {
             #[cfg(not(target_arch = "wasm32"))]
             last_second: std::time::Instant::now(),
@@ -36,7 +48,7 @@ impl FPS {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         self.frame_count += 1;
 
         if self.last_second.elapsed() >= std::time::Duration::from_secs(1) {
@@ -47,7 +59,7 @@ impl FPS {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         self.frame_count += 1;
 
         let now = web_sys::window()
@@ -61,4 +73,8 @@ impl FPS {
             self.last_second = now;
         }
     }
+}
+
+fn update(mut fps: ResMut<FPS>) {
+    fps.update();
 }

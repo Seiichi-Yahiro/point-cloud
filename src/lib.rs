@@ -1,16 +1,11 @@
 pub use app::App;
 
 mod app;
-mod camera;
-mod fps;
-mod gpu;
-mod input_data;
-mod point_renderer;
-mod streaming;
+mod plugins;
+//mod streaming;
 mod texture;
 mod transform;
-mod ui;
-mod viewport;
+
 #[cfg(target_arch = "wasm32")]
 mod web;
 

@@ -22,6 +22,11 @@
 
         async function main() {
             await init();
+
+            window.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
+
             console.log("WASM loaded");
             await run();
         }

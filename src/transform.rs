@@ -1,8 +1,9 @@
 use std::ops::Mul;
 
+use bevy_ecs::prelude::Component;
 use glam::{Mat3, Mat4, Quat, Vec3};
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Component)]
 pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,

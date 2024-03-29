@@ -1,38 +1,39 @@
+use std::sync::Arc;
+
 use cfg_if::cfg_if;
-use egui_wgpu::ScreenDescriptor;
-use winit::dpi::PhysicalSize;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 
-use crate::fps::FPS;
-use crate::gpu::GPU;
-use crate::input_data::InputData;
-use crate::point_renderer::PointRenderer;
-use crate::streaming::{CellStreamer, EmptyCellStreamer, LocalCellStreamer};
-use crate::ui::EguiRenderer;
-use crate::viewport::{Viewport, ViewportDescriptor};
+use crate::plugins::camera::CameraPlugin;
+use crate::plugins::fps::FPSPlugin;
+use crate::plugins::input::InputPlugin;
+use crate::plugins::render::RenderPlugin;
+use crate::plugins::ui::UiPlugin;
+use crate::plugins::wgpu::WGPUPlugin;
+use crate::plugins::winit::{Window, WinitPlugin};
 
-#[derive(Debug)]
+/*#[derive(Debug)]
 enum UserEvent {
     ChangeCellStreamer(Box<dyn CellStreamer>),
-}
+}*/
 
-pub struct App {
-    viewport: Viewport,
-    gpu: GPU,
-    cell_streamer: Box<dyn CellStreamer>,
-    point_renderer: PointRenderer,
-    ui: EguiRenderer,
-    input_data: InputData,
-    fps: FPS,
-    event_loop_proxy: EventLoopProxy<UserEvent>,
-}
+pub struct App;
 
 impl App {
     pub async fn run() {
         setup_logger();
 
-        let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build().unwrap();
+        let mut app = bevy_app::App::new();
+        app.add_plugins(WinitPlugin);
+
+        WGPUPlugin::build(
+            Arc::clone(app.world.get_resource::<Window>().unwrap()),
+            &mut app,
+        )
+        .await;
+
+        app.add_plugins((InputPlugin, CameraPlugin, RenderPlugin, FPSPlugin, UiPlugin))
+            .run();
+
+        /*let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build().unwrap();
         let event_loop_proxy = event_loop.create_proxy();
 
         let instance = wgpu::Instance::default();
@@ -90,10 +91,11 @@ impl App {
             } else {
                 event_loop.run(event_handler).unwrap();
             }
-        }
+        }*/
     }
+}
 
-    fn window_event(
+/*    fn window_event(
         &mut self,
         window_event: WindowEvent,
         target: &EventLoopWindowTarget<UserEvent>,
@@ -248,7 +250,7 @@ impl App {
             },
         );
     }
-}
+}*/
 
 fn setup_logger() {
     cfg_if! {
