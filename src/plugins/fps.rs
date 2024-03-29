@@ -78,3 +78,8 @@ impl FPS {
 fn update(mut fps: ResMut<FPS>) {
     fps.update();
 }
+
+pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    let fps = world.get_resource::<FPS>().unwrap().to_string();
+    ui.label(fps);
+}

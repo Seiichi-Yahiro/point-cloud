@@ -308,3 +308,59 @@ fn update_cells(
         }
     }
 }
+
+pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    {
+        let cells = world.get_resource::<Cells>().unwrap();
+
+        ui.label(format!("Loaded cells: {}", cells.loaded.len()));
+        ui.label(format!("Cells to load: {}", cells.should_load.len()));
+        ui.label(format!("Is loading: {}", cells.loading.is_some()));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if ui.button("Choose metadata...").clicked() {
+        let (sender, receiver) = flume::bounded(1);
+        world
+            .get_resource_mut::<Channels>()
+            .unwrap()
+            .set_directory_receiver(receiver);
+
+        let dir = {
+            let window: &winit::window::Window = world
+                .get_resource::<crate::plugins::winit::Window>()
+                .unwrap();
+
+            rfd::FileDialog::new()
+                .add_filter("metadata", &["json"])
+                .set_parent(window)
+                .pick_file()
+                .and_then(|it| it.parent().map(std::path::Path::to_path_buf))
+        };
+
+        if let Some(dir) = dir {
+            sender.send(Source::Directory(dir)).unwrap();
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    if ui.button("Choose dir...").clicked() {
+        let (sender, receiver) = flume::bounded(1);
+        world
+            .get_non_send_resource_mut::<Channels>()
+            .unwrap()
+            .set_directory_receiver(receiver);
+
+        wasm_bindgen_futures::spawn_local(async move {
+            use wasm_bindgen::JsCast;
+
+            if let Ok(dir) = crate::web::chooseDir().await {
+                let dir = dir
+                    .dyn_into::<web_sys::FileSystemDirectoryHandle>()
+                    .unwrap();
+
+                sender.send(Source::Directory(dir)).unwrap();
+            }
+        });
+    }
+}
