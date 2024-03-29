@@ -7,6 +7,7 @@ use egui_winit::State;
 
 use crate::plugins::fps::FPS;
 use crate::plugins::render::{CommandEncoder, TextureView};
+use crate::plugins::streaming::{ChannelsResMut, Source};
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
 use crate::plugins::winit::{Window, WindowEvent};
 
@@ -85,7 +86,12 @@ fn prepare(mut egui: ResMut<Egui>, window: Res<Window>) {
     egui.context.begin_frame(raw_input);
 }
 
-fn ui(egui: ResMut<Egui>, fps: Res<FPS>, window: Res<Window>) {
+fn ui(
+    egui: ResMut<Egui>,
+    fps: Res<FPS>,
+    #[cfg(not(target_arch = "wasm32"))] window: Res<Window>,
+    mut channels: ChannelsResMut,
+) {
     egui::Window::new("UI")
         .resizable(false)
         .show(&egui.context, |ui| {
@@ -93,6 +99,9 @@ fn ui(egui: ResMut<Egui>, fps: Res<FPS>, window: Res<Window>) {
 
             #[cfg(not(target_arch = "wasm32"))]
             if ui.button("Choose metadata...").clicked() {
+                let (sender, receiver) = flume::bounded(1);
+                channels.set_directory_receiver(receiver);
+
                 let window: &winit::window::Window = &window;
 
                 let dir = rfd::FileDialog::new()
@@ -101,11 +110,16 @@ fn ui(egui: ResMut<Egui>, fps: Res<FPS>, window: Res<Window>) {
                     .pick_file()
                     .and_then(|it| it.parent().map(std::path::Path::to_path_buf));
 
-                if let Some(dir) = dir {}
+                if let Some(dir) = dir {
+                    sender.send(Source::Directory(dir)).unwrap();
+                }
             }
 
             #[cfg(target_arch = "wasm32")]
             if ui.button("Choose dir...").clicked() {
+                let (sender, receiver) = flume::bounded(1);
+                channels.set_directory_receiver(receiver);
+
                 wasm_bindgen_futures::spawn_local(async move {
                     use wasm_bindgen::JsCast;
 
@@ -113,6 +127,8 @@ fn ui(egui: ResMut<Egui>, fps: Res<FPS>, window: Res<Window>) {
                         let dir = dir
                             .dyn_into::<web_sys::FileSystemDirectoryHandle>()
                             .unwrap();
+
+                        sender.send(Source::Directory(dir)).unwrap();
                     }
                 });
             }

@@ -2,7 +2,6 @@ pub use app::App;
 
 mod app;
 mod plugins;
-//mod streaming;
 mod texture;
 mod transform;
 

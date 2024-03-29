@@ -3,7 +3,6 @@ use std::ops::{Deref, DerefMut};
 use bevy_app::AppExit;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use glam::Vec3;
 use wgpu::SurfaceError;
 
 use crate::plugins::camera::{Camera, ViewProjectionBindGroupLayout};
@@ -12,7 +11,7 @@ use crate::plugins::wgpu::{Device, Queue, Surface, SurfaceConfig};
 use crate::plugins::winit::{Window, WindowResized};
 use crate::texture::Texture;
 
-mod vertex;
+pub mod vertex;
 
 pub struct RenderPlugin;
 
@@ -99,21 +98,6 @@ fn setup(
         pipeline,
         depth_texture: Texture::create_depth_texture(&device, config.width, config.height),
     });
-
-    // TODO remove
-    commands.spawn(VertexBuffer::new(
-        &device,
-        &[
-            Vertex {
-                position: Vec3::ZERO,
-                color: [255, 0, 0, 255],
-            },
-            Vertex {
-                position: Vec3::new(0.1, 0.1, 0.00000001),
-                color: [0, 255, 0, 255],
-            },
-        ],
-    ));
 }
 
 fn update_depth_texture(
