@@ -5,7 +5,7 @@ use bevy_ecs::event::{EventReader, EventWriter};
 use bevy_ecs::prelude::*;
 use egui::ahash::HashSet;
 use winit::dpi::PhysicalPosition;
-use winit::event::{ElementState, MouseButton};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::plugins::winit::WindowEvent;
@@ -18,6 +18,7 @@ impl Plugin for InputPlugin {
             .init_resource::<PressedMouseButtons>()
             .add_event::<KeyEvent>()
             .add_event::<MouseButtonEvent>()
+            .add_event::<MouseWheelEvent>()
             .add_event::<CursorEvent>()
             .add_systems(First, handle_window_events);
     }
@@ -65,6 +66,11 @@ pub struct MouseButtonEvent {
     pub state: ElementState,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Event)]
+pub struct MouseWheelEvent {
+    pub delta: MouseScrollDelta,
+}
+
 #[derive(Debug, Copy, Clone, Event)]
 pub struct CursorEvent {
     pub position: PhysicalPosition<f64>,
@@ -75,6 +81,7 @@ fn handle_window_events(
     mut window_events: EventReader<WindowEvent>,
     mut key_events: EventWriter<KeyEvent>,
     mut mouse_button_events: EventWriter<MouseButtonEvent>,
+    mut mouse_wheel_events: EventWriter<MouseWheelEvent>,
     mut cursor_events: EventWriter<CursorEvent>,
     mut last_cursor_position: Local<Option<PhysicalPosition<f64>>>,
     mut pressed_keys: ResMut<PressedKeys>,
@@ -118,6 +125,9 @@ fn handle_window_events(
                     button: *button,
                     state: *state,
                 });
+            }
+            WinitWindowEvent::MouseWheel { delta, .. } => {
+                mouse_wheel_events.send(MouseWheelEvent { delta: *delta });
             }
             WinitWindowEvent::CursorLeft { .. } => {
                 *last_cursor_position = None;
