@@ -11,10 +11,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::Camera;
 use crate::plugins::camera::projection::PerspectiveProjection;
+use crate::plugins::camera::Camera;
 use crate::plugins::render::vertex::{Vertex, VertexBuffer};
-use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
+use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -140,16 +140,14 @@ fn receive_files(
 
                 cells.should_load.clear();
 
-                for status in cells.loaded.values() {
+                for (_, status) in cells.loaded.drain() {
                     match status {
                         LoadedCellStatus::Missing => {}
                         LoadedCellStatus::Loaded(entity) => {
-                            commands.entity(*entity).despawn();
+                            commands.entity(entity).despawn();
                         }
                     }
                 }
-
-                cells.loaded.clear();
             }
             Err(err) => {
                 log::error!("Failed to load metadata: {:?}", err);
