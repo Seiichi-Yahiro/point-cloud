@@ -20,8 +20,6 @@ pub struct FlyCamController {
     keybindings: FlyCamKeybindings,
     mouse_sensitivity: f32,
     movement_speed: f32,
-    yaw: f32,
-    pitch: f32,
     look_around: bool,
 }
 
@@ -31,8 +29,6 @@ impl FlyCamController {
             keybindings: FlyCamKeybindings::default(),
             mouse_sensitivity: 0.002,
             movement_speed: 0.1,
-            yaw: 0.0,
-            pitch: 0.0,
             look_around: false,
         }
     }
@@ -105,17 +101,16 @@ fn update(
         fly_cam.look_around = pressed_mouse_buttons.is_pressed(&fly_cam.keybindings.look_around);
 
         if fly_cam.look_around {
-            let has_events = !cursor_events.is_empty();
-
             for cursor_event in cursor_events.read() {
-                fly_cam.yaw -= cursor_event.delta.x as f32 * fly_cam.mouse_sensitivity;
-                fly_cam.pitch -= cursor_event.delta.y as f32 * fly_cam.mouse_sensitivity;
-                fly_cam.pitch = fly_cam.pitch.clamp(-1.54, 1.54);
-            }
+                let relative_yaw = -cursor_event.delta.x as f32 * fly_cam.mouse_sensitivity;
+                let relative_pitch = -cursor_event.delta.y as f32 * fly_cam.mouse_sensitivity;
 
-            if has_events {
-                transform.rotation =
-                    Quat::from_euler(EulerRot::YXZ, fly_cam.yaw, fly_cam.pitch, 0.0);
+                let (yaw, pitch, roll) = transform.rotation.to_euler(EulerRot::YXZ);
+
+                let new_yaw = yaw + relative_yaw;
+                let new_pitch = (pitch + relative_pitch).clamp(-1.54, 1.54);
+
+                transform.rotation = Quat::from_euler(EulerRot::YXZ, new_yaw, new_pitch, roll);
             }
         } else {
             cursor_events.clear();
