@@ -16,10 +16,22 @@ pub enum LoadFile {
     Stop,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+type LoadedFileError = std::io::Error;
+
+#[cfg(target_arch = "wasm32")]
+type LoadedFileError = js_sys::Error;
+
 #[derive(Debug)]
 pub enum LoadedFile {
-    Metadata(Metadata),
-    Cell { id: CellId, cell: Option<Cell> },
+    Metadata {
+        source: Source,
+        metadata: Result<Metadata, LoadedFileError>,
+    },
+    Cell {
+        id: CellId,
+        cell: Result<Option<Cell>, LoadedFileError>,
+    },
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,25 +40,23 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
 
     std::thread::spawn(move || loop {
         match receiver.recv() {
-            Ok(LoadFile::Metadata(Source::Directory(dir))) => {
-                let path = dir.join("metadata").with_extension("json");
-
-                match Metadata::from_path(path) {
-                    Ok(metadata) => {
-                        log::info!("Loaded metadata for {}", metadata.name);
-
-                        if let Err(err) = sender.send(LoadedFile::Metadata(metadata)) {
-                            log::error!("{:?}", err);
-                            return;
-                        }
+            Ok(LoadFile::Metadata(source)) => {
+                let load_result = match &source {
+                    Source::Directory(dir) => {
+                        let path = dir.join("metadata").with_extension("json");
+                        Metadata::from_path(path)
                     }
-                    Err(err) => {
-                        log::error!("Failed to load metadata: {:?}", err);
+                    Source::URL => {
+                        todo!()
                     }
-                }
-            }
-            Ok(LoadFile::Metadata(Source::URL)) => {
-                todo!();
+                };
+
+                sender
+                    .send(LoadedFile::Metadata {
+                        metadata: load_result,
+                        source,
+                    })
+                    .unwrap();
             }
             Ok(LoadFile::Cell {
                 id,
@@ -57,29 +67,26 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
 
                 match Cell::from_path(path, sub_grid_dimension) {
                     Ok(cell) => {
-                        log::debug!("Loaded cell {:?}", id);
-
-                        if let Err(err) = sender.send(LoadedFile::Cell {
-                            cell: Some(cell),
-                            id,
-                        }) {
-                            log::error!("{:?}", err);
-                            return;
-                        }
+                        sender
+                            .send(LoadedFile::Cell {
+                                cell: Ok(Some(cell)),
+                                id,
+                            })
+                            .unwrap();
                     }
-                    Err(err) => match err.kind() {
-                        std::io::ErrorKind::NotFound => {
-                            log::warn!("Couldn't find cell {:?}", id);
+                    Err(err) => {
+                        let load_result = match err.kind() {
+                            std::io::ErrorKind::NotFound => Ok(None),
+                            _ => Err(err),
+                        };
 
-                            if let Err(err) = sender.send(LoadedFile::Cell { cell: None, id }) {
-                                log::error!("{:?}", err);
-                                return;
-                            }
-                        }
-                        _ => {
-                            log::error!("Failed to load cell {:?}: {:?}", id, err);
-                        }
-                    },
+                        sender
+                            .send(LoadedFile::Cell {
+                                cell: load_result,
+                                id,
+                            })
+                            .unwrap();
+                    }
                 }
             }
             Ok(LoadFile::Cell {
@@ -102,54 +109,54 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
 
 #[cfg(target_arch = "wasm32")]
 pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<LoadedFile>) {
-    log::debug!("Spawning loader thread");
+    log::debug!("Spawning async loader task");
 
     wasm_bindgen_futures::spawn_local(async move {
         loop {
             match receiver.recv_async().await {
-                Ok(LoadFile::Metadata(Source::Directory(dir))) => {
-                    let result = load_metadata(dir).await.and_then(|metadata| {
-                        sender
-                            .send(LoadedFile::Metadata(metadata))
-                            .map_err(|err| js_sys::Error::new(&err.to_string()))
-                    });
+                Ok(LoadFile::Metadata(source)) => {
+                    let load_result = match &source {
+                        Source::Directory(dir) => load_metadata(dir).await,
+                        Source::URL => {
+                            todo!()
+                        }
+                    };
 
-                    if let Err(err) = result {
-                        log::error!("Failed to load metadata: {:?}", err);
-                    }
-                }
-                Ok(LoadFile::Metadata(Source::URL)) => {
-                    todo!()
+                    sender
+                        .send(LoadedFile::Metadata {
+                            metadata: load_result,
+                            source,
+                        })
+                        .unwrap();
                 }
                 Ok(LoadFile::Cell {
                     id,
                     sub_grid_dimension,
                     source: Source::Directory(dir),
-                }) => {
-                    let result = load_cell(id, sub_grid_dimension, dir)
-                        .await
-                        .and_then(|cell| {
-                            sender
-                                .send(LoadedFile::Cell {
-                                    cell: Some(cell),
-                                    id,
-                                })
-                                .map_err(|err| js_sys::Error::new(&err.to_string()))
-                        });
-
-                    if let Err(err) = result {
-                        if err.name() == "NotFoundError" {
-                            log::warn!("Couldn't find cell {:?}", id);
-
-                            if let Err(err) = sender.send(LoadedFile::Cell { cell: None, id }) {
-                                log::error!("{:?}", err);
-                                return;
-                            }
-                        } else {
-                            log::error!("Failed to load cell {:?}: {:?}", id, err);
-                        }
+                }) => match load_cell(id, sub_grid_dimension, dir).await {
+                    Ok(cell) => {
+                        sender
+                            .send(LoadedFile::Cell {
+                                id,
+                                cell: Ok(Some(cell)),
+                            })
+                            .unwrap();
                     }
-                }
+                    Err(err) => {
+                        let load_result = if err.name() == "NotFoundError" {
+                            Ok(None)
+                        } else {
+                            Err(err)
+                        };
+
+                        sender
+                            .send(LoadedFile::Cell {
+                                id,
+                                cell: load_result,
+                            })
+                            .unwrap();
+                    }
+                },
                 Ok(LoadFile::Cell {
                     source: Source::URL,
                     ..
@@ -157,11 +164,11 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
                     todo!()
                 }
                 Ok(LoadFile::Stop) => {
-                    log::debug!("Stopping loader thread");
+                    log::debug!("Stopping async loader task");
                     return;
                 }
                 Err(RecvError::Disconnected) => {
-                    log::error!("Loader threads sender has disconnected");
+                    log::error!("Async loader's sender has disconnected");
                     return;
                 }
             }
@@ -171,11 +178,11 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
 
 #[cfg(target_arch = "wasm32")]
 async fn load_metadata(
-    dir: crate::plugins::streaming::Directory,
+    dir: &crate::plugins::streaming::Directory,
 ) -> Result<Metadata, js_sys::Error> {
     use wasm_bindgen::JsCast;
 
-    let buffer = crate::web::readBytes(&dir, "metadata.json").await?;
+    let buffer = crate::web::readBytes(dir, "metadata.json").await?;
     let array_buffer = buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap();
 
     let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();

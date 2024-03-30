@@ -1,5 +1,6 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemState;
 use cfg_if::cfg_if;
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::TryRecvError;
@@ -10,10 +11,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::Camera;
 use crate::plugins::camera::projection::PerspectiveProjection;
+use crate::plugins::camera::Camera;
 use crate::plugins::render::vertex::{Vertex, VertexBuffer};
-use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
+use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -29,34 +30,29 @@ impl Plugin for StreamingPlugin {
         spawn_loader(load_receiver, loaded_sender);
 
         let channels = Channels {
-            source_receiver: None,
             load_sender,
             loaded_receiver,
         };
 
         cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                app.insert_non_send_resource(ActiveMetadata::default()).insert_non_send_resource(channels);
+                app.insert_non_send_resource(ActiveMetadata::None).insert_non_send_resource(channels);
             } else {
-                app.insert_resource(ActiveMetadata::default()).insert_resource(channels);
+                app.insert_resource(ActiveMetadata::None).insert_resource(channels);
             }
         }
 
         app.insert_resource(Cells::default()).add_systems(
             Update,
-            (
-                trigger_metadata_loading,
-                (update_cells, receive_files, trigger_cell_loading).chain(),
-            ),
+            (update_cells, receive_files, trigger_cell_loading).chain(),
         );
     }
 }
 
-#[derive(Default)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
-pub struct ActiveMetadata {
-    metadata: Option<Metadata>,
-    source: Option<Source>,
+pub enum ActiveMetadata {
+    Loaded { source: Source, metadata: Metadata },
+    None,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,7 +69,10 @@ pub type ActiveMetadataResMut<'w> = NonSendMut<'w, ActiveMetadata>;
 
 impl ActiveMetadata {
     pub fn metadata(&self) -> Option<&Metadata> {
-        self.metadata.as_ref()
+        match self {
+            ActiveMetadata::Loaded { metadata, .. } => Some(metadata),
+            ActiveMetadata::None => None,
+        }
     }
 }
 
@@ -90,23 +89,16 @@ pub enum Source {
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
-pub struct Channels {
-    source_receiver: Option<flume::Receiver<Source>>,
+struct Channels {
     load_sender: flume::Sender<LoadFile>,
     loaded_receiver: flume::Receiver<LoadedFile>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub type ChannelsRes<'w> = Res<'w, Channels>;
+type ChannelsRes<'w> = Res<'w, Channels>;
 
 #[cfg(target_arch = "wasm32")]
-pub type ChannelsRes<'w> = NonSend<'w, Channels>;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub type ChannelsResMut<'w> = ResMut<'w, Channels>;
-
-#[cfg(target_arch = "wasm32")]
-pub type ChannelsResMut<'w> = NonSendMut<'w, Channels>;
+type ChannelsRes<'w> = NonSend<'w, Channels>;
 
 impl Drop for Channels {
     fn drop(&mut self) {
@@ -114,27 +106,23 @@ impl Drop for Channels {
     }
 }
 
-impl Channels {
-    pub fn set_directory_receiver(&mut self, receiver: flume::Receiver<Source>) {
-        self.source_receiver = Some(receiver);
-    }
-}
-
-fn trigger_metadata_loading(
+fn receive_files(
     mut commands: Commands,
+    channels: ChannelsRes,
     mut active_metadata: ActiveMetadataResMut,
-    mut channels: ChannelsResMut,
+    device: Res<Device>,
     mut cells: ResMut<Cells>,
 ) {
-    if let Some(receiver) = channels.source_receiver.take() {
-        match receiver.try_recv() {
-            Ok(source) => {
-                active_metadata.source = Some(source.clone());
+    match channels.loaded_receiver.try_recv() {
+        Ok(LoadedFile::Metadata { source, metadata }) => match metadata {
+            Ok(metadata) => {
+                log::debug!(
+                    "Loaded metadata for {} with {} points",
+                    metadata.name,
+                    metadata.number_of_points
+                );
 
-                channels
-                    .load_sender
-                    .send(LoadFile::Metadata(source))
-                    .unwrap();
+                *active_metadata = ActiveMetadata::Loaded { metadata, source };
 
                 cells.should_load.clear();
 
@@ -149,51 +137,45 @@ fn trigger_metadata_loading(
 
                 cells.loaded.clear();
             }
-            Err(TryRecvError::Disconnected) => {
-                // should only happen in wasm build
-                // meaning the dir selection was canceled
+            Err(err) => {
+                log::error!("Failed to load metadata: {:?}", err);
             }
-            Err(TryRecvError::Empty) => {
-                channels.source_receiver = Some(receiver);
-            }
-        }
-    }
-}
-
-fn receive_files(
-    mut commands: Commands,
-    channels: ChannelsRes,
-    mut active_metadata: ActiveMetadataResMut,
-    device: Res<Device>,
-    mut cells: ResMut<Cells>,
-) {
-    match channels.loaded_receiver.try_recv() {
-        Ok(LoadedFile::Metadata(metadata)) => {
-            active_metadata.metadata = Some(metadata);
-        }
+        },
         Ok(LoadedFile::Cell { id, cell }) => {
             cells.loading = None;
 
             if !cells.should_load.remove(&id) {
-                // cell was no longer needed after it finished loading
+                log::debug!(
+                    "Cell {:?} was no longer needed after it finished loading",
+                    id
+                );
                 return;
             }
 
-            if let Some(cell) = cell {
-                let points = cell
-                    .points()
-                    .iter()
-                    .map(|it| Vertex {
-                        position: Vec3::new(it.pos.x, it.pos.z, -it.pos.y),
-                        color: it.color,
-                    })
-                    .collect_vec();
+            match cell {
+                Ok(Some(cell)) => {
+                    log::debug!("Loaded cell: {:?}", id);
 
-                let entity = commands.spawn(VertexBuffer::new(&device, &points)).id();
-                cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
-            } else {
-                // TODO handle error cells
-                cells.loaded.insert(id, LoadedCellStatus::Missing);
+                    let points = cell
+                        .points()
+                        .iter()
+                        .map(|it| Vertex {
+                            position: Vec3::new(it.pos.x, it.pos.z, -it.pos.y),
+                            color: it.color,
+                        })
+                        .collect_vec();
+
+                    let entity = commands.spawn(VertexBuffer::new(&device, &points)).id();
+                    cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
+                }
+                Ok(None) => {
+                    log::debug!("Cell is missing: {:?}", id);
+                    cells.loaded.insert(id, LoadedCellStatus::Missing);
+                }
+                Err(err) => {
+                    // TODO do something with the failed cell
+                    log::error!("Failed to load cell {:?}: {:?}", id, err);
+                }
             }
         }
         Err(TryRecvError::Disconnected) => {
@@ -213,7 +195,7 @@ fn trigger_cell_loading(
     }
 
     if let Some(id) = cells.should_load.iter().copied().next() {
-        if let Some(metadata) = active_metadata.metadata() {
+        if let ActiveMetadata::Loaded { metadata, source } = &*active_metadata {
             cells.loading = Some(id);
 
             channels
@@ -221,10 +203,7 @@ fn trigger_cell_loading(
                 .send(LoadFile::Cell {
                     id,
                     sub_grid_dimension: metadata.sub_grid_dimension,
-                    source: active_metadata
-                        .source
-                        .clone()
-                        .expect("Source should always exist when metadata exists"),
+                    source: source.clone(),
                 })
                 .unwrap();
         }
@@ -320,12 +299,6 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
 
     #[cfg(not(target_arch = "wasm32"))]
     if ui.button("Choose metadata...").clicked() {
-        let (sender, receiver) = flume::bounded(1);
-        world
-            .get_resource_mut::<Channels>()
-            .unwrap()
-            .set_directory_receiver(receiver);
-
         let dir = {
             let window: &winit::window::Window = world
                 .get_resource::<crate::plugins::winit::Window>()
@@ -339,17 +312,22 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         };
 
         if let Some(dir) = dir {
-            sender.send(Source::Directory(dir)).unwrap();
+            let mut params = SystemState::<ChannelsRes>::new(world);
+            let channels = params.get(world);
+
+            channels
+                .load_sender
+                .send(LoadFile::Metadata(Source::Directory(dir)))
+                .unwrap();
         }
     }
 
     #[cfg(target_arch = "wasm32")]
     if ui.button("Choose dir...").clicked() {
-        let (sender, receiver) = flume::bounded(1);
-        world
-            .get_non_send_resource_mut::<Channels>()
-            .unwrap()
-            .set_directory_receiver(receiver);
+        let mut params = SystemState::<ChannelsRes>::new(world);
+        let channels = params.get(world);
+
+        let load_sender = channels.load_sender.clone();
 
         wasm_bindgen_futures::spawn_local(async move {
             use wasm_bindgen::JsCast;
@@ -359,7 +337,9 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
                     .dyn_into::<web_sys::FileSystemDirectoryHandle>()
                     .unwrap();
 
-                sender.send(Source::Directory(dir)).unwrap();
+                load_sender
+                    .send(LoadFile::Metadata(Source::Directory(dir)))
+                    .unwrap();
             }
         });
     }

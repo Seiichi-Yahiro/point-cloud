@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 
 use glam::{IVec3, Vec3};
@@ -59,20 +59,11 @@ impl Metadata {
         serde_json::from_reader(reader)
     }
 
-    pub fn from_path<T: AsRef<Path>>(path: T) -> serde_json::Result<Self> {
-        let file = match std::fs::File::open(path) {
-            Ok(file) => file,
-            Err(err) => {
-                use serde::de::Error;
-                return Err(serde_json::Error::custom(format!(
-                    "Failed to open file: {}",
-                    err
-                )));
-            }
-        };
-
+    pub fn from_path<T: AsRef<Path>>(path: T) -> Result<Self, std::io::Error> {
+        let file = std::fs::File::open(path)?;
         let buf_reader = std::io::BufReader::new(file);
         serde_json::from_reader(buf_reader)
+            .map_err(|err| std::io::Error::new(ErrorKind::InvalidData, err))
     }
 }
 
