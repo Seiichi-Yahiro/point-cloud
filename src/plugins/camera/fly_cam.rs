@@ -1,17 +1,18 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use glam::{EulerRot, Quat, Vec3};
-use winit::event::MouseButton;
+use winit::event::{MouseButton, MouseScrollDelta};
 use winit::keyboard::KeyCode;
 
-use crate::plugins::input::{CursorEvent, PressedKeys, PressedMouseButtons};
+use crate::plugins::input::{CursorEvent, MouseWheelEvent, PressedKeys, PressedMouseButtons};
 use crate::transform::Transform;
 
 pub struct FlyCamPlugin;
 
 impl Plugin for FlyCamPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update);
+        app.add_systems(PreUpdate, update_movement_speed)
+            .add_systems(Update, update);
     }
 }
 
@@ -24,11 +25,14 @@ pub struct FlyCamController {
 }
 
 impl FlyCamController {
+    const MIN_MOVEMENT_SPEED: f32 = 0.1;
+    const MAX_MOVEMENT_SPEED: f32 = 50.0;
+
     pub fn new() -> Self {
         Self {
             keybindings: FlyCamKeybindings::default(),
             mouse_sensitivity: 0.002,
-            movement_speed: 0.1,
+            movement_speed: 1.0,
             look_around: false,
         }
     }
@@ -120,4 +124,42 @@ fn update(
             transform.translation += velocity;
         }
     }
+}
+
+fn update_movement_speed(
+    mut query: Query<&mut FlyCamController>,
+    mut mouse_wheel_event: EventReader<MouseWheelEvent>,
+) {
+    let mut fly_cam = query.get_single_mut().unwrap();
+
+    if !fly_cam.look_around {
+        return;
+    }
+
+    for event in mouse_wheel_event.read() {
+        match event.delta {
+            MouseScrollDelta::LineDelta(_, y) => {
+                fly_cam.movement_speed = (fly_cam.movement_speed + y).clamp(
+                    FlyCamController::MIN_MOVEMENT_SPEED,
+                    FlyCamController::MAX_MOVEMENT_SPEED,
+                );
+            }
+            MouseScrollDelta::PixelDelta(_) => {}
+        }
+    }
+}
+
+pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    let mut fly_cam = world
+        .query::<&mut FlyCamController>()
+        .get_single_mut(world)
+        .unwrap();
+
+    ui.label("Camera speed:");
+
+    let movement_speed = egui::DragValue::new(&mut fly_cam.movement_speed)
+        .clamp_range(FlyCamController::MIN_MOVEMENT_SPEED..=FlyCamController::MAX_MOVEMENT_SPEED)
+        .speed(0.1);
+
+    ui.add(movement_speed);
 }
