@@ -1,29 +1,40 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemState;
+use bevy_ecs::system::{SystemId, SystemState};
 use cfg_if::cfg_if;
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::TryRecvError;
-use glam::{IVec3, Vec3};
+use glam::{IVec3, Vec3, Vec3Swizzles};
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
+use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::vertex::{Vertex, VertexBuffer};
-use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
+use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
 mod loader;
 
+#[derive(Resource)]
+struct OneShotSystems {
+    look_at_bounding_box: SystemId,
+}
+
 pub struct StreamingPlugin;
 
 impl Plugin for StreamingPlugin {
     fn build(&self, app: &mut App) {
+        let look_at_bounding_box_system = app.world.register_system(look_at_bounding_box);
+
+        app.world.insert_resource(OneShotSystems {
+            look_at_bounding_box: look_at_bounding_box_system,
+        });
+
         let (load_sender, load_receiver) = flume::unbounded::<LoadFile>();
         let (loaded_sender, loaded_receiver) = flume::unbounded::<LoadedFile>();
 
@@ -112,6 +123,7 @@ fn receive_files(
     mut active_metadata: ActiveMetadataResMut,
     device: Res<Device>,
     mut cells: ResMut<Cells>,
+    one_shot_systems: Res<OneShotSystems>,
 ) {
     match channels.loaded_receiver.try_recv() {
         Ok(LoadedFile::Metadata { source, metadata }) => match metadata {
@@ -121,6 +133,8 @@ fn receive_files(
                     metadata.name,
                     metadata.number_of_points
                 );
+
+                commands.run_system(one_shot_systems.look_at_bounding_box);
 
                 *active_metadata = ActiveMetadata::Loaded { metadata, source };
 
@@ -284,6 +298,25 @@ fn update_cells(
 
             cells.loaded = new_loaded;
             cells.should_load = new_loading;
+        }
+    }
+}
+
+fn look_at_bounding_box(
+    mut query: Query<&mut Transform, With<Camera>>,
+    active_metadata: ActiveMetadataRes,
+) {
+    if let Some(metadata) = active_metadata.metadata() {
+        let flip_z = Vec3::new(1.0, 1.0, -1.0);
+        let min = metadata.bounding_box.min.xzy() * flip_z;
+        let max = metadata.bounding_box.max.xzy() * flip_z;
+        let center = (min + max) / 2.0;
+
+        let center_max_y = center.with_y(max.y);
+
+        for mut transform in query.iter_mut() {
+            *transform = Transform::from_translation(max + (center_max_y - max) / 2.0)
+                .looking_at(center, Vec3::Y);
         }
     }
 }
