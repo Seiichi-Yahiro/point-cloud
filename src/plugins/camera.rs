@@ -91,14 +91,17 @@ fn setup(
         Transform::from_translation(Vec3::new(0.0, 0.0, 2.0)).looking_at(Vec3::ZERO, Vec3::Y);
     let projection = PerspectiveProjection::default();
 
-    let view_projection_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("view-projection-uniform"),
-        contents: bytemuck::cast_slice(&[
-            transform.compute_matrix().inverse(),
-            projection.compute_matrix(),
-        ]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let view_projection_uniform = {
+        let view_mat = transform.compute_matrix().inverse();
+        let projection_mat = projection.compute_matrix();
+        let view_projection_mat = projection_mat * view_mat;
+
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("view-projection-uniform"),
+            contents: bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        })
+    };
 
     let viewport_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("viewport-uniform"),
@@ -153,13 +156,14 @@ fn write_view_projection_uniform(
     >,
 ) {
     for (camera, transform, projection) in view_projection_query.iter() {
+        let view_mat = transform.compute_matrix().inverse();
+        let projection_mat = projection.compute_matrix();
+        let view_projection_mat = projection_mat * view_mat;
+
         queue.write_buffer(
             &camera.view_projection,
             0,
-            bytemuck::cast_slice(&[
-                transform.compute_matrix().inverse(),
-                projection.compute_matrix(),
-            ]),
+            bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
         );
     }
 }

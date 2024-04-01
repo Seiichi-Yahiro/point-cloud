@@ -1,6 +1,7 @@
 struct VPUniform {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
+    view_proj: mat4x4<f32>,
 }
 
 @group(0) @binding(0)
@@ -31,10 +32,8 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
 
     let resolution = vec2<f32>(viewport);
 
-    let view_proj = vp.projection * vp.view;
-
-    let start_clip: vec4<f32> = view_proj * vec4(instance.start, 1.0);
-    let end_clip: vec4<f32> = view_proj * vec4(instance.end, 1.0);
+    let start_clip: vec4<f32> = vp.view_proj * vec4(instance.start, 1.0);
+    let end_clip: vec4<f32> = vp.view_proj * vec4(instance.end, 1.0);
 
     let start_ndc: vec2<f32> = start_clip.xy / start_clip.w;
     let end_ndc: vec2<f32> = end_clip.xy / end_clip.w;

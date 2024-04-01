@@ -1,6 +1,7 @@
 struct VPUniform {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
+    view_proj: mat4x4<f32>,
 }
 
 // View Matrix
@@ -53,7 +54,7 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
     let bill_board_offset = cam_right * local_splat_position.x + cam_up * local_splat_position.y;
     let billboard_position = vec4<f32>(instance.position + bill_board_offset, 1.0);
 
-    out.clip_position = vp.projection * vp.view * billboard_position;
+    out.clip_position = vp.view_proj * billboard_position;
     out.color = instance.color;
     out.splat_pos = local_splat_position;
 
