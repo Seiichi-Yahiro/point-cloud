@@ -13,7 +13,7 @@ use point_converter::metadata::Metadata;
 
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
-use crate::plugins::render::vertex::{Vertex, VertexBuffer};
+use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
@@ -171,7 +171,7 @@ fn receive_files(
                     let points = cell
                         .points()
                         .iter()
-                        .map(|it| Vertex {
+                        .map(|it| crate::plugins::render::point::Point {
                             position: Vec3::new(it.pos.x, it.pos.z, -it.pos.y),
                             color: it.color,
                         })

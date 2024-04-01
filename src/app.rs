@@ -7,7 +7,6 @@ use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
 use crate::plugins::render::RenderPlugin;
 use crate::plugins::streaming::StreamingPlugin;
-use crate::plugins::ui::UiPlugin;
 use crate::plugins::wgpu::WGPUPlugin;
 use crate::plugins::winit::{Window, WinitPlugin};
 
@@ -32,7 +31,6 @@ impl App {
             RenderPlugin,
             StreamingPlugin,
             FPSPlugin,
-            UiPlugin,
         ))
         .run();
     }

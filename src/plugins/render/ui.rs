@@ -5,7 +5,7 @@ use egui::epaint::Shadow;
 use egui_wgpu::{Renderer, ScreenDescriptor};
 use egui_winit::State;
 
-use crate::plugins::render::{CommandEncoder, TextureView};
+use crate::plugins::render::{GlobalRenderResources, RenderPassSet};
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
 use crate::plugins::winit::{Window, WindowEvent};
 
@@ -15,13 +15,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
             .add_systems(PreUpdate, handle_input)
-            .add_systems(
-                Last,
-                (prepare, ui, draw)
-                    .chain()
-                    .in_set(crate::plugins::render::RenderSet)
-                    .after(crate::plugins::render::MainDraw),
-            );
+            .add_systems(Last, (prepare, ui, draw).chain().in_set(RenderPassSet::UI));
     }
 }
 
@@ -106,9 +100,10 @@ fn draw(
     device: Res<Device>,
     queue: Res<Queue>,
     config: Res<SurfaceConfig>,
-    view: Res<TextureView>,
-    mut encoder: ResMut<CommandEncoder>,
+    mut global_render_resources: ResMut<GlobalRenderResources>,
 ) {
+    let global_render_resources = &mut *global_render_resources;
+
     let full_output = egui.context.end_frame();
 
     egui.state
@@ -128,23 +123,31 @@ fn draw(
         pixels_per_point: egui.context.pixels_per_point(),
     };
 
-    egui.renderer
-        .update_buffers(&device, &queue, &mut encoder, &tris, &screen_descriptor);
+    egui.renderer.update_buffers(
+        &device,
+        &queue,
+        &mut global_render_resources.encoder,
+        &tris,
+        &screen_descriptor,
+    );
 
-    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("egui-main-render-pass"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: wgpu::StoreOp::Store,
-            },
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-    });
+    let mut rpass =
+        global_render_resources
+            .encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("egui-main-render-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &global_render_resources.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
     egui.renderer.render(&mut rpass, &tris, &screen_descriptor);
 
