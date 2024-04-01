@@ -137,15 +137,21 @@ fn update_movement_speed(
     }
 
     for event in mouse_wheel_event.read() {
-        match event.delta {
-            MouseScrollDelta::LineDelta(_, y) => {
-                fly_cam.movement_speed = (fly_cam.movement_speed + y).clamp(
-                    FlyCamController::MIN_MOVEMENT_SPEED,
-                    FlyCamController::MAX_MOVEMENT_SPEED,
-                );
-            }
-            MouseScrollDelta::PixelDelta(_) => {}
-        }
+        let y_delta = match event.delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+        };
+
+        let y_delta = if y_delta == 0.0 {
+            0.0
+        } else {
+            y_delta.signum()
+        };
+
+        fly_cam.movement_speed = (fly_cam.movement_speed + y_delta).clamp(
+            FlyCamController::MIN_MOVEMENT_SPEED,
+            FlyCamController::MAX_MOVEMENT_SPEED,
+        );
     }
 }
 
