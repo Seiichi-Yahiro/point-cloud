@@ -26,7 +26,8 @@ pub struct FlyCamController {
 
 impl FlyCamController {
     const MIN_MOVEMENT_SPEED: f32 = 0.1;
-    const MAX_MOVEMENT_SPEED: f32 = 50.0;
+    const MAX_MOVEMENT_SPEED: f32 = 20.0;
+    const MOVEMENT_SPEED_STEP: f32 = 0.1;
 
     pub fn new() -> Self {
         Self {
@@ -145,7 +146,7 @@ fn update_movement_speed(
         let y_delta = if y_delta == 0.0 {
             0.0
         } else {
-            y_delta.signum()
+            y_delta.signum() * FlyCamController::MOVEMENT_SPEED_STEP
         };
 
         fly_cam.movement_speed = (fly_cam.movement_speed + y_delta).clamp(
@@ -165,7 +166,7 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
 
     let movement_speed = egui::DragValue::new(&mut fly_cam.movement_speed)
         .clamp_range(FlyCamController::MIN_MOVEMENT_SPEED..=FlyCamController::MAX_MOVEMENT_SPEED)
-        .speed(0.1);
+        .speed(FlyCamController::MOVEMENT_SPEED_STEP);
 
     ui.add(movement_speed);
 }
