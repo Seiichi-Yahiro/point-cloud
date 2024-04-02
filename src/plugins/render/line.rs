@@ -3,10 +3,12 @@ use bevy_ecs::prelude::*;
 use glam::Vec3;
 
 use crate::plugins::camera::{Camera, ViewBindGroupLayout};
-use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::render::{GlobalDepthTexture, GlobalRenderResources, RenderPassSet};
+use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::{Device, SurfaceConfig};
 use crate::texture::Texture;
+
+pub mod utils;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -49,7 +51,7 @@ fn setup(
     config: Res<SurfaceConfig>,
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
 ) {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("line.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("line/line.wgsl"));
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("line-renderer-pipeline-layout"),
