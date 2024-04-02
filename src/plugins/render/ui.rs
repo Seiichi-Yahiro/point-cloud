@@ -82,6 +82,7 @@ fn ui(world: &mut World) {
     egui::Window::new("UI")
         .resizable(false)
         .default_width(150.0)
+        .vscroll(true)
         .show(
             &world.get_resource::<Egui>().unwrap().context.clone(),
             |ui| {

@@ -11,10 +11,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::Camera;
 use crate::plugins::camera::projection::PerspectiveProjection;
+use crate::plugins::camera::Camera;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
+use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -28,6 +28,13 @@ struct OneShotSystems {
 #[derive(Resource)]
 struct Settings {
     lock_view: bool,
+}
+
+#[derive(Component)]
+pub struct CellData {
+    pub id: CellId,
+    pub pos: Vec3,
+    pub size: f32,
 }
 
 pub struct StreamingPlugin;
@@ -185,7 +192,15 @@ fn receive_files(
                         })
                         .collect_vec();
 
-                    let entity = commands.spawn(VertexBuffer::new(&device, &points)).id();
+                    let buffer = VertexBuffer::new(&device, &points);
+                    let header = cell.header();
+                    let cell_data = CellData {
+                        id,
+                        pos: header.pos,
+                        size: header.size,
+                    };
+
+                    let entity = commands.spawn((cell_data, buffer)).id();
                     cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
                 }
                 Ok(None) => {
@@ -279,7 +294,7 @@ fn update_cells(
                 let ids = (min_cell_index.x..=max_cell_index.x)
                     .cartesian_product(min_cell_index.y..=max_cell_index.y)
                     .cartesian_product(min_cell_index.z..=max_cell_index.z)
-                    .map(|((x, y), z)| IVec3::new(x, y, z))
+                    .map(|((x, y), z)| IVec3::new(x, -z, y))
                     .map(move |index| CellId { index, hierarchy });
 
                 // copy or insert cells that need to be loaded
