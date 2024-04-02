@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use wgpu::TextureFormat;
 
 use crate::plugins::winit::Window;
 
@@ -84,9 +85,24 @@ impl WGPUPlugin {
             .await
             .expect("Failed to create device");
 
-        let config = surface
-            .get_default_config(&adapter, size.width, size.height)
-            .unwrap();
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|format| *format == TextureFormat::Bgra8Unorm)
+            .unwrap_or(surface_caps.formats[0]);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width,
+            height: size.height,
+            present_mode: surface_caps.present_modes[0],
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: Vec::new(),
+            desired_maximum_frame_latency: 2,
+        };
 
         surface.configure(&device, &config);
 
