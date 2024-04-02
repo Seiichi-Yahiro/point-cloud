@@ -3,13 +3,13 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemId;
 use glam::Vec3;
 
-use crate::plugins::camera::projection::PerspectiveProjection;
-use crate::plugins::render::line::utils::{line_box, line_strip};
+use crate::plugins::camera::Camera;
+use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::render::line::Line;
+use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::{ActiveMetadataRes, CellData};
 use crate::plugins::wgpu::Device;
-use crate::transform::Transform;
 
 pub struct DebugPlugin;
 
@@ -69,63 +69,31 @@ struct FrustumLine;
 fn toggle_frustum(
     show: In<bool>,
     mut commands: Commands,
-    camera_query: Query<(&Transform, &PerspectiveProjection)>,
+    camera_query: Query<&Frustum, With<Camera>>,
     device: Res<Device>,
     frustum_query: Query<Entity, With<FrustumLine>>,
 ) {
     if *show {
-        for (transform, projection) in camera_query.iter() {
-            let cam_pos = transform.translation;
-            let cam_forward = transform.forward();
-            let cam_right = transform.right();
-            let cam_up = transform.up();
-
-            let slope = (projection.fov_y * 0.5).tan();
-
-            let half_height_near = projection.near * slope;
-            let half_width_near = half_height_near * projection.aspect_ratio;
-
-            let half_height_far = projection.far * slope;
-            let half_width_far = half_height_far * projection.aspect_ratio;
-
-            let center_on_near_plane = cam_pos + projection.near * cam_forward;
-            let center_on_far_plane = cam_pos + projection.far * cam_forward;
-
-            let near_up = cam_up * half_height_near;
-            let near_right = cam_right * half_width_near;
-
-            let near_top_left = center_on_near_plane + near_up - near_right;
-            let near_top_right = center_on_near_plane + near_up + near_right;
-            let near_bottom_left = center_on_near_plane - near_up - near_right;
-            let near_bottom_right = center_on_near_plane - near_up + near_right;
-
-            let far_up = cam_up * half_height_far;
-            let far_right = cam_right * half_width_far;
-
-            let far_top_left = center_on_far_plane + far_up - far_right;
-            let far_top_right = center_on_far_plane + far_up + far_right;
-            let far_bottom_left = center_on_far_plane - far_up - far_right;
-            let far_bottom_right = center_on_far_plane - far_up + far_right;
-
+        for frustum in camera_query.iter() {
             let mut connections = vec![
                 Line {
-                    start: near_top_left,
-                    end: far_top_left,
+                    start: frustum.near.top_left,
+                    end: frustum.far.top_left,
                     color: [0, 255, 0, 255],
                 },
                 Line {
-                    start: near_top_right,
-                    end: far_top_right,
+                    start: frustum.near.top_right,
+                    end: frustum.far.top_right,
                     color: [0, 255, 0, 255],
                 },
                 Line {
-                    start: near_bottom_left,
-                    end: far_bottom_left,
+                    start: frustum.near.bottom_left,
+                    end: frustum.far.bottom_left,
                     color: [0, 255, 0, 255],
                 },
                 Line {
-                    start: near_bottom_right,
-                    end: far_bottom_right,
+                    start: frustum.near.bottom_right,
+                    end: frustum.far.bottom_right,
                     color: [0, 255, 0, 255],
                 },
             ];
@@ -133,24 +101,50 @@ fn toggle_frustum(
             connections.append(&mut line_strip(
                 [255, 0, 0, 255],
                 &[
-                    near_top_left,
-                    near_top_right,
-                    near_bottom_right,
-                    near_bottom_left,
-                    near_top_left,
+                    frustum.near.top_left,
+                    frustum.near.top_right,
+                    frustum.near.bottom_right,
+                    frustum.near.bottom_left,
+                    frustum.near.top_left,
                 ],
             ));
 
             connections.append(&mut line_strip(
                 [0, 0, 255, 255],
                 &[
-                    far_top_left,
-                    far_top_right,
-                    far_bottom_right,
-                    far_bottom_left,
-                    far_top_left,
+                    frustum.far.top_left,
+                    frustum.far.top_right,
+                    frustum.far.bottom_right,
+                    frustum.far.bottom_left,
+                    frustum.far.top_left,
                 ],
             ));
+
+            connections.extend(
+                [
+                    Line {
+                        start: Vec3::ZERO,
+                        end: frustum.planes.top.truncate() * frustum.planes.top.w,
+                        color: [255, 255, 0, 255],
+                    },
+                    Line {
+                        start: Vec3::ZERO,
+                        end: frustum.planes.right.truncate() * frustum.planes.right.w,
+                        color: [255, 255, 0, 255],
+                    },
+                    Line {
+                        start: Vec3::ZERO,
+                        end: frustum.planes.bottom.truncate() * frustum.planes.bottom.w,
+                        color: [255, 255, 0, 255],
+                    },
+                    Line {
+                        start: Vec3::ZERO,
+                        end: frustum.planes.left.truncate() * frustum.planes.left.w,
+                        color: [255, 255, 0, 255],
+                    },
+                ]
+                .iter(),
+            );
 
             commands.spawn((FrustumLine, VertexBuffer::new(&device, &connections)));
         }

@@ -6,12 +6,14 @@ use glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
+use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
 use crate::plugins::winit::WindowResized;
 use crate::transform::Transform;
 
 pub mod fly_cam;
+pub mod frustum;
 pub mod projection;
 
 pub struct CameraPlugin;
@@ -58,6 +60,7 @@ impl Plugin for CameraPlugin {
                 (
                     write_view_projection_uniform,
                     write_viewport_uniform.run_if(resource_changed::<SurfaceConfig>),
+                    update_frustum,
                 ),
             );
     }
@@ -133,6 +136,7 @@ fn setup(
         FlyCamController::new(),
         transform,
         projection,
+        Frustum::default(),
     ));
 }
 
@@ -145,6 +149,20 @@ fn update_aspect_ratio(
             projection.aspect_ratio =
                 resized.physical_size.width as f32 / resized.physical_size.height as f32;
         }
+    }
+}
+
+fn update_frustum(
+    mut query: Query<
+        (&mut Frustum, &Transform, &PerspectiveProjection),
+        (
+            With<Camera>,
+            Or<(Changed<Transform>, Changed<PerspectiveProjection>)>,
+        ),
+    >,
+) {
+    for (mut frustum, transform, projection) in query.iter_mut() {
+        *frustum = Frustum::new(transform, projection);
     }
 }
 
