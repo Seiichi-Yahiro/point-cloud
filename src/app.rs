@@ -3,6 +3,7 @@ use std::sync::Arc;
 use cfg_if::cfg_if;
 
 use crate::plugins::camera::CameraPlugin;
+use crate::plugins::debug::DebugPlugin;
 use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
 use crate::plugins::render::RenderPlugin;
@@ -31,6 +32,7 @@ impl App {
             RenderPlugin,
             StreamingPlugin,
             FPSPlugin,
+            DebugPlugin,
         ))
         .run();
     }

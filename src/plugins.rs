@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod debug;
 pub mod fps;
 pub mod input;
 pub mod render;

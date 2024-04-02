@@ -90,6 +90,8 @@ fn ui(world: &mut World) {
                 crate::plugins::camera::fly_cam::draw_ui(ui, world);
                 ui.separator();
                 crate::plugins::streaming::draw_ui(ui, world);
+                ui.separator();
+                crate::plugins::debug::draw_ui(ui, world);
             },
         );
 }
