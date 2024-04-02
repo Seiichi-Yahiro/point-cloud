@@ -4,17 +4,17 @@ use bevy_ecs::system::{SystemId, SystemState};
 use cfg_if::cfg_if;
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::TryRecvError;
-use glam::{IVec3, Vec3, Vec3Swizzles};
+use glam::{IVec3, Vec3};
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
+use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
+use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -25,10 +25,16 @@ struct OneShotSystems {
     look_at_bounding_box: SystemId,
 }
 
+#[derive(Resource)]
+struct Settings {
+    lock_view: bool,
+}
+
 pub struct StreamingPlugin;
 
 impl Plugin for StreamingPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(Settings { lock_view: false });
         let look_at_bounding_box_system = app.world.register_system(look_at_bounding_box);
 
         app.world.insert_resource(OneShotSystems {
@@ -55,7 +61,9 @@ impl Plugin for StreamingPlugin {
 
         app.insert_resource(Cells::default()).add_systems(
             Update,
-            (update_cells, receive_files, trigger_cell_loading).chain(),
+            (update_cells, receive_files, trigger_cell_loading)
+                .chain()
+                .run_if(|settings: Res<Settings>| !settings.lock_view),
         );
     }
 }
@@ -318,6 +326,11 @@ fn look_at_bounding_box(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    {
+        let mut settings = world.get_resource_mut::<Settings>().unwrap();
+        ui.checkbox(&mut settings.lock_view, "Lock view");
+    }
+
     {
         let cells = world.get_resource::<Cells>().unwrap();
 
