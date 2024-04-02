@@ -200,16 +200,16 @@ pub enum CellAddPointError {
 #[derive(Debug)]
 pub struct Header {
     /// Number of points in this cell.
-    number_of_points: u32,
+    pub number_of_points: u32,
 
     /// Does a grid exists?
-    has_grid: bool,
+    pub has_grid: bool,
 
     /// The side length of the cubic cell.
-    size: f32,
+    pub size: f32,
 
     /// The position of the cell in the world.
-    pos: Vec3,
+    pub pos: Vec3,
 }
 
 impl Header {
