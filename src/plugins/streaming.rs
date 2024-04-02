@@ -305,15 +305,13 @@ fn look_at_bounding_box(
     active_metadata: ActiveMetadataRes,
 ) {
     if let Some(metadata) = active_metadata.metadata() {
-        let flip_z = Vec3::new(1.0, 1.0, -1.0);
-        let min = metadata.bounding_box.min.xzy() * flip_z;
-        let max = metadata.bounding_box.max.xzy() * flip_z;
-        let center = (min + max) / 2.0;
+        let aabb = metadata.bounding_box.flip_yz();
+        let center = (aabb.min + aabb.max) / 2.0;
 
-        let center_max_y = center.with_y(max.y);
+        let center_max_y = center.with_y(aabb.max.y);
 
         for mut transform in query.iter_mut() {
-            *transform = Transform::from_translation(max + (center_max_y - max) / 2.0)
+            *transform = Transform::from_translation(aabb.max + (center_max_y - aabb.max) / 2.0)
                 .looking_at(center, Vec3::Y);
         }
     }

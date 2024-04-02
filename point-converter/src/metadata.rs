@@ -1,7 +1,7 @@
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 
-use glam::{IVec3, Vec3};
+use glam::{IVec3, Vec3, Vec3Swizzles};
 use serde::{Deserialize, Serialize};
 
 use crate::point::Point;
@@ -99,5 +99,12 @@ impl BoundingBox {
     pub fn extend(&mut self, point: Point) {
         self.min = self.min.min(point.pos);
         self.max = self.max.max(point.pos);
+    }
+
+    pub fn flip_yz(&self) -> Self {
+        let flip_z = Vec3::new(1.0, 1.0, -1.0);
+        let min = self.min.xzy() * flip_z;
+        let max = self.max.xzy() * flip_z;
+        Self { min, max }
     }
 }
