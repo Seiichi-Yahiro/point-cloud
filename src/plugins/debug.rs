@@ -310,27 +310,34 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
                 .unwrap();
         }
 
-        if ui.checkbox(&mut state.grid.show, "Grid").changed() {
-            let toggle_grid = world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
-
-            for (hierarchy, show) in state.grid.hierarchies.iter().enumerate() {
-                if *show {
-                    world
-                        .run_system_with_input(toggle_grid, (state.grid.show, hierarchy as u32))
-                        .unwrap();
-                }
-            }
-        }
-
-        ui.collapsing("Grid Hierarchies", |ui| {
-            for (hierarchy, show) in state.grid.hierarchies.iter_mut().enumerate() {
-                if ui.checkbox(show, hierarchy.to_string()).changed() {
+        let id = ui.make_persistent_id("collapsing_grid_header");
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+            .show_header(ui, |ui| {
+                if ui.checkbox(&mut state.grid.show, "Grid").changed() {
                     let toggle_grid = world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
-                    world
-                        .run_system_with_input(toggle_grid, (*show, hierarchy as u32))
-                        .unwrap();
+
+                    for (hierarchy, show) in state.grid.hierarchies.iter().enumerate() {
+                        if *show {
+                            world
+                                .run_system_with_input(
+                                    toggle_grid,
+                                    (state.grid.show, hierarchy as u32),
+                                )
+                                .unwrap();
+                        }
+                    }
                 }
-            }
-        });
+            })
+            .body(|ui| {
+                for (hierarchy, show) in state.grid.hierarchies.iter_mut().enumerate() {
+                    if ui.checkbox(show, hierarchy.to_string()).changed() {
+                        let toggle_grid =
+                            world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
+                        world
+                            .run_system_with_input(toggle_grid, (*show, hierarchy as u32))
+                            .unwrap();
+                    }
+                }
+            });
     });
 }
