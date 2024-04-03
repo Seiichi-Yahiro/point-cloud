@@ -80,8 +80,8 @@ fn prepare(mut egui: ResMut<Egui>, window: Res<Window>) {
 
 fn ui(world: &mut World) {
     egui::Window::new("UI")
-        .resizable(false)
-        .default_width(150.0)
+        .resizable(true)
+        .default_size((150.0, 200.0))
         .vscroll(true)
         .show(
             &world.get_resource::<Egui>().unwrap().context.clone(),
