@@ -143,7 +143,7 @@ fn draw(
         render_pass.set_pipeline(&local_render_resources.pipeline);
         render_pass.set_bind_group(0, &camera.bind_group, &[]);
 
-        for vertex_buffer in vertex_buffers.iter() {
+        for vertex_buffer in vertex_buffers.iter_many(camera.visible_entities.iter()) {
             render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
             render_pass.draw(0..4, 0..vertex_buffer.len());
         }

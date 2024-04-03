@@ -6,7 +6,7 @@ use glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
-use crate::plugins::camera::frustum::Frustum;
+use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
 use crate::plugins::winit::WindowResized;
@@ -60,7 +60,7 @@ impl Plugin for CameraPlugin {
                 (
                     write_view_projection_uniform,
                     write_viewport_uniform.run_if(resource_changed::<SurfaceConfig>),
-                    update_frustum,
+                    (update_frustum, frustum_cull).chain(),
                 ),
             );
     }
@@ -82,6 +82,14 @@ pub struct Camera {
     pub view_projection: wgpu::Buffer,
     pub viewport: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
+    pub visible_entities: Vec<Entity>,
+    pub frustum_cull_settings: FrustumCullSettings,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FrustumCullSettings {
+    pub enabled: bool,
+    pub paused: bool,
 }
 
 fn setup(
@@ -132,6 +140,11 @@ fn setup(
             view_projection: view_projection_uniform,
             viewport: viewport_uniform,
             bind_group: view_bind_group,
+            visible_entities: Vec::new(),
+            frustum_cull_settings: FrustumCullSettings {
+                enabled: true,
+                paused: false,
+            },
         },
         FlyCamController::new(),
         transform,
@@ -153,7 +166,7 @@ fn update_aspect_ratio(
 }
 
 fn update_frustum(
-    mut query: Query<
+    mut camera_query: Query<
         (&mut Frustum, &Transform, &PerspectiveProjection),
         (
             With<Camera>,
@@ -161,8 +174,33 @@ fn update_frustum(
         ),
     >,
 ) {
-    for (mut frustum, transform, projection) in query.iter_mut() {
+    for (mut frustum, transform, projection) in camera_query.iter_mut() {
         *frustum = Frustum::new(transform, projection);
+    }
+}
+
+fn frustum_cull(
+    mut camera_query: Query<(&mut Camera, &Frustum)>,
+    object_query: Query<(Entity, &Aabb)>,
+) {
+    for (mut camera, frustum) in camera_query.iter_mut() {
+        if camera.frustum_cull_settings.paused {
+            continue;
+        }
+
+        camera.visible_entities.clear();
+
+        if camera.frustum_cull_settings.enabled {
+            for (entity, aabb) in object_query.iter() {
+                if !frustum.cull_aabb(*aabb) {
+                    camera.visible_entities.push(entity);
+                }
+            }
+        } else {
+            for (entity, _aabb) in object_query.iter() {
+                camera.visible_entities.push(entity);
+            }
+        }
     }
 }
 
@@ -197,5 +235,28 @@ fn write_viewport_uniform(
             0,
             bytemuck::cast_slice(&[UVec2::new(config.width, config.height)]),
         );
+    }
+}
+
+pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    ui.label("Frustum culling:");
+
+    let mut query = world.query::<&mut Camera>();
+    for mut camera in query.iter_mut(world) {
+        let mut enabled = camera.frustum_cull_settings.enabled;
+        if ui.checkbox(&mut enabled, "Enabled").changed() {
+            camera.frustum_cull_settings.enabled = enabled;
+
+            if !enabled {
+                camera.frustum_cull_settings.paused = false;
+            }
+        }
+
+        let mut paused = camera.frustum_cull_settings.paused;
+        let paused_check_box = egui::Checkbox::new(&mut paused, "Paused");
+
+        if ui.add_enabled(enabled, paused_check_box).changed() {
+            camera.frustum_cull_settings.paused = paused;
+        }
     }
 }

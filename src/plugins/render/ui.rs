@@ -88,6 +88,7 @@ fn ui(world: &mut World) {
             |ui| {
                 crate::plugins::fps::draw_ui(ui, world);
                 ui.separator();
+                crate::plugins::camera::draw_ui(ui, world);
                 crate::plugins::camera::fly_cam::draw_ui(ui, world);
                 ui.separator();
                 crate::plugins::streaming::draw_ui(ui, world);

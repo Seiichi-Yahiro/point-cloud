@@ -236,7 +236,7 @@ fn add_grid(
                 0,
                 255,
             ],
-            Vec3::new(cell_data.pos.x, cell_data.pos.z, -cell_data.pos.y),
+            cell_data.pos,
             Vec3::splat(cell_data.size / 2.0),
         );
 
@@ -266,7 +266,7 @@ fn toggle_grid(
                         0,
                         255,
                     ],
-                    Vec3::new(cell_data.pos.x, cell_data.pos.z, -cell_data.pos.y),
+                    cell_data.pos,
                     Vec3::splat(cell_data.size / 2.0),
                 );
 

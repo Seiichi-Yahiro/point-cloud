@@ -11,10 +11,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
+use crate::plugins::camera::frustum::Aabb;
+use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedFile};
+use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -196,11 +197,16 @@ fn receive_files(
                     let header = cell.header();
                     let cell_data = CellData {
                         id,
-                        pos: header.pos,
+                        pos: Vec3::new(header.pos.x, header.pos.z, -header.pos.y),
                         size: header.size,
                     };
 
-                    let entity = commands.spawn((cell_data, buffer)).id();
+                    let aabb = Aabb::new(
+                        cell_data.pos - cell_data.size / 2.0,
+                        cell_data.pos + cell_data.size / 2.0,
+                    );
+
+                    let entity = commands.spawn((cell_data, buffer, aabb)).id();
                     cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
                 }
                 Ok(None) => {

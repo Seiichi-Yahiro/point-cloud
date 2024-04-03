@@ -14,11 +14,11 @@ pub struct Corners {
 
 /// Planes in Hessian normal form.
 ///
-/// ax + by + cz + d = 0\
+/// ax + by + cz - d = 0\
 /// (a,b,c) is the normal\
 /// d is the distance from the origin along the normal
 ///
-/// Encoded into a Vec3 where (x,y,z) is the normal and w the distance.
+/// Encoded into a Vec4 where (x,y,z) is the normal and w the distance.
 #[derive(Debug, Default, Clone)]
 pub struct Planes {
     pub near: Vec4,
@@ -112,8 +112,8 @@ impl Frustum {
             .cross(near.bottom_right - cam_pos)
             .normalize_or_zero();
 
-        let near_plane = normal_near.extend((cam_forward * projection.near).dot(normal_near));
-        let far_plane = normal_far.extend((cam_forward * projection.far).dot(normal_far));
+        let near_plane = normal_near.extend(center_on_near_plane.dot(normal_near));
+        let far_plane = normal_far.extend(center_on_far_plane.dot(normal_far));
         let top_plane = normal_top.extend(cam_pos.dot(normal_top));
         let bottom_plane = normal_bottom.extend(cam_pos.dot(normal_bottom));
         let left_plane = normal_left.extend(cam_pos.dot(normal_left));
@@ -131,5 +131,50 @@ impl Frustum {
                 right: right_plane,
             },
         }
+    }
+
+    /// Calculates if the provided aabb should be culled.
+    pub fn cull_aabb(&self, aabb: Aabb) -> bool {
+        for plane in self.planes.iter() {
+            let corner_x = if plane.x >= 0.0 {
+                aabb.max.x
+            } else {
+                aabb.min.x
+            };
+
+            let corner_y = if plane.y >= 0.0 {
+                aabb.max.y
+            } else {
+                aabb.min.y
+            };
+
+            let corner_z = if plane.z >= 0.0 {
+                aabb.max.z
+            } else {
+                aabb.min.z
+            };
+
+            let nearest_corner = Vec4::new(corner_x, corner_y, corner_z, -1.0);
+
+            // calculate signed distance
+            // negative means outside (behind the plane)
+            if plane.dot(nearest_corner) <= 0.0 {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, Component)]
+pub struct Aabb {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl Aabb {
+    pub fn new(min: Vec3, max: Vec3) -> Self {
+        Self { min, max }
     }
 }
