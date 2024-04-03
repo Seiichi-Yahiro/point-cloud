@@ -28,7 +28,7 @@ struct OneShotSystems {
 
 #[derive(Resource)]
 struct Settings {
-    lock_view: bool,
+    pause_streaming: bool,
 }
 
 #[derive(Component)]
@@ -42,7 +42,9 @@ pub struct StreamingPlugin;
 
 impl Plugin for StreamingPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Settings { lock_view: false });
+        app.insert_resource(Settings {
+            pause_streaming: false,
+        });
         let look_at_bounding_box_system = app.world.register_system(look_at_bounding_box);
 
         app.world.insert_resource(OneShotSystems {
@@ -71,7 +73,7 @@ impl Plugin for StreamingPlugin {
             Update,
             (update_cells, receive_files, trigger_cell_loading)
                 .chain()
-                .run_if(|settings: Res<Settings>| !settings.lock_view),
+                .run_if(|settings: Res<Settings>| !settings.pause_streaming),
         );
     }
 }
@@ -349,7 +351,7 @@ fn look_at_bounding_box(
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     {
         let mut settings = world.get_resource_mut::<Settings>().unwrap();
-        ui.checkbox(&mut settings.lock_view, "Lock view");
+        ui.checkbox(&mut settings.pause_streaming, "Pause streaming");
     }
 
     {
