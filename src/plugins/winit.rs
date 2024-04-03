@@ -85,9 +85,10 @@ impl Plugin for WinitPlugin {
                 .remove_non_send_resource::<EventLoop<UserEvent>>()
                 .unwrap();
 
+            let mut app_exist_event_reader = ManualEventReader::<AppExit>::default();
+
             let event_handler =
                 move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| {
-                    let mut app_exist_event_reader = ManualEventReader::<AppExit>::default();
                     let app_exist_events = app.world.get_resource_mut::<Events<AppExit>>().unwrap();
 
                     if app_exist_event_reader
@@ -96,6 +97,7 @@ impl Plugin for WinitPlugin {
                         .is_some()
                     {
                         target.exit();
+                        return;
                     }
 
                     if let Event::WindowEvent {
