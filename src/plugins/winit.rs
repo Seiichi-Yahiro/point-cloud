@@ -40,7 +40,15 @@ impl Deref for WindowEvent {
     }
 }
 
-pub struct WinitPlugin;
+pub struct WinitPlugin {
+    pub canvas_id: String,
+}
+
+impl WinitPlugin {
+    pub fn new(canvas_id: String) -> Self {
+        Self { canvas_id }
+    }
+}
 
 impl Plugin for WinitPlugin {
     fn build(&self, app: &mut App) {
@@ -53,15 +61,18 @@ impl Plugin for WinitPlugin {
                 use winit::platform::web::WindowBuilderExtWebSys;
 
                 let canvas = web_sys::window()
-                    .unwrap()
-                    .document()
-                    .unwrap()
-                    .get_element_by_id("point-cloud-canvas")
-                    .unwrap()
-                    .dyn_into::<web_sys::HtmlCanvasElement>()
-                    .unwrap();
+                .unwrap()
+                .document()
+                .unwrap()
+                .get_element_by_id(&self.canvas_id)
+                .expect(&format!("Couldn't find canvas with id: {}", self.canvas_id))
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .unwrap();
 
-                window_builder = window_builder.with_canvas(Some(canvas));
+                window_builder = window_builder.with_prevent_default(true)
+                    .with_canvas(Some(canvas))
+                    .with_append(true);
+
             } else {
                 window_builder = window_builder.with_inner_size(PhysicalSize::new(800, 600));
             }
@@ -85,14 +96,14 @@ impl Plugin for WinitPlugin {
                 .remove_non_send_resource::<EventLoop<UserEvent>>()
                 .unwrap();
 
-            let mut app_exist_event_reader = ManualEventReader::<AppExit>::default();
+            let mut app_exit_event_reader = ManualEventReader::<AppExit>::default();
 
             let event_handler =
                 move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| {
-                    let app_exist_events = app.world.get_resource_mut::<Events<AppExit>>().unwrap();
+                    let app_exit_events = app.world.get_resource_mut::<Events<AppExit>>().unwrap();
 
-                    if app_exist_event_reader
-                        .read(&app_exist_events)
+                    if app_exit_event_reader
+                        .read(&app_exit_events)
                         .last()
                         .is_some()
                     {

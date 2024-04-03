@@ -18,7 +18,7 @@ impl App {
         setup_logger();
 
         let mut app = bevy_app::App::new();
-        app.add_plugins(WinitPlugin);
+        app.add_plugins(WinitPlugin::new("point-cloud-canvas".to_string()));
 
         WGPUPlugin::build(
             Arc::clone(app.world.get_resource::<Window>().unwrap()),
