@@ -83,7 +83,7 @@ pub struct Camera {
     pub viewport: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     pub visible_entities: Vec<Entity>,
-    pub frustum_cull_settings: FrustumCullSettings,
+    frustum_cull_settings: FrustumCullSettings,
 }
 
 #[derive(Debug, Copy, Clone)]
