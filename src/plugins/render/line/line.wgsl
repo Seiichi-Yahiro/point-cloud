@@ -17,7 +17,7 @@ struct InstanceInput {
 }
 
 struct VertexInput {
-    @builtin(vertex_index) vertex_index: u32,
+    @builtin(vertex_index) index: u32,
 }
 
 struct VertexOutput {
@@ -26,7 +26,7 @@ struct VertexOutput {
 }
 
 @vertex
-fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
+fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
     out.color = instance.color;
 
@@ -44,8 +44,8 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
     let dir = normalize(end_screen - start_screen);
     let dir_normal = vec2(-dir.y, dir.x);
 
-    let clip: vec4<f32> = alternate_start_end_4(in.vertex_index, start_clip, end_clip);
-    let screen: vec2<f32> = alternate_start_end_2(in.vertex_index, start_screen, end_screen);
+    let clip: vec4<f32> = alternate_start_end_4(vertex.index, start_clip, end_clip);
+    let screen: vec2<f32> = alternate_start_end_2(vertex.index, start_screen, end_screen);
 
     let thickness = 4.0;
     var half_line_width = thickness / (clip.w * 2.0);
@@ -53,7 +53,7 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
         half_line_width = 0.5;
     }
 
-    let screen_offset = dir_normal * half_line_width * f32(alternateSign(in.vertex_index));
+    let screen_offset = dir_normal * half_line_width * f32(alternateSign(vertex.index));
     let screen_pos = screen + screen_offset;
     let ndc_pos = (2.0 * screen_pos) / resolution - 1.0;
     let clip_pos = ndc_pos * clip.w;

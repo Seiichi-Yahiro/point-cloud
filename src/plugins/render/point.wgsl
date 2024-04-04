@@ -19,7 +19,7 @@ struct InstanceInput {
 }
 
 struct VertexInput {
-    @builtin(vertex_index) vertex_index: u32,
+    @builtin(vertex_index) index: u32,
 }
 
 struct VertexOutput {
@@ -42,7 +42,7 @@ fn get_splat_position(index: u32) -> vec2<f32> {
 }
 
 @vertex
-fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
+fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
     let view_t = transpose(vp.view);
@@ -50,7 +50,7 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
     let cam_right = view_t[0].xyz;
     let cam_up = view_t[1].xyz;
 
-    let local_splat_position = get_splat_position(in.vertex_index);
+    let local_splat_position = get_splat_position(vertex.index);
     let bill_board_offset = cam_right * local_splat_position.x + cam_up * local_splat_position.y;
     let billboard_position = vec4<f32>(instance.position + bill_board_offset, 1.0);
 
