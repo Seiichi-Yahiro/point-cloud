@@ -258,5 +258,7 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         if ui.add_enabled(enabled, paused_check_box).changed() {
             camera.frustum_cull_settings.paused = paused;
         }
+
+        ui.label(format!("Visible cells: {}", camera.visible_entities.len()));
     }
 }
