@@ -69,12 +69,17 @@ impl Plugin for StreamingPlugin {
             }
         }
 
-        app.insert_resource(Cells::default()).add_systems(
-            Update,
-            (update_cells, receive_files, trigger_cell_loading)
-                .chain()
-                .run_if(|settings: Res<Settings>| !settings.pause_streaming),
-        );
+        app.insert_resource(Cells::default())
+            .add_systems(
+                PreUpdate,
+                receive_files.run_if(|settings: Res<Settings>| !settings.pause_streaming),
+            )
+            .add_systems(
+                PostUpdate,
+                (update_cells, trigger_cell_loading)
+                    .chain()
+                    .run_if(|settings: Res<Settings>| !settings.pause_streaming),
+            );
     }
 }
 
