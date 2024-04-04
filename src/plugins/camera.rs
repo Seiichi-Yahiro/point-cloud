@@ -92,6 +92,21 @@ struct FrustumCullSettings {
     pub paused: bool,
 }
 
+#[derive(Debug, Copy, Clone, Component)]
+pub struct Visibility {
+    pub visible: bool,
+    computed_visibility: bool,
+}
+
+impl Visibility {
+    pub fn new(visible: bool) -> Self {
+        Self {
+            visible,
+            computed_visibility: true,
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     device: Res<Device>,
@@ -181,7 +196,7 @@ fn update_frustum(
 
 fn frustum_cull(
     mut camera_query: Query<(&mut Camera, &Frustum)>,
-    object_query: Query<(Entity, &Aabb)>,
+    mut object_query: Query<(Entity, &Aabb, &mut Visibility)>,
 ) {
     for (mut camera, frustum) in camera_query.iter_mut() {
         if camera.frustum_cull_settings.paused {
@@ -191,14 +206,20 @@ fn frustum_cull(
         camera.visible_entities.clear();
 
         if camera.frustum_cull_settings.enabled {
-            for (entity, aabb) in object_query.iter() {
-                if !frustum.cull_aabb(*aabb) {
+            for (entity, aabb, mut visibility) in object_query.iter_mut() {
+                visibility.computed_visibility = !frustum.cull_aabb(*aabb);
+
+                if visibility.visible && visibility.computed_visibility {
                     camera.visible_entities.push(entity);
                 }
             }
         } else {
-            for (entity, _aabb) in object_query.iter() {
-                camera.visible_entities.push(entity);
+            for (entity, _aabb, mut visibility) in object_query.iter_mut() {
+                visibility.computed_visibility = true;
+
+                if visibility.visible {
+                    camera.visible_entities.push(entity);
+                }
             }
         }
     }

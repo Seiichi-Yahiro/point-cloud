@@ -11,7 +11,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::Camera;
+use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::camera::frustum::Aabb;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::vertex::VertexBuffer;
@@ -208,7 +208,9 @@ fn receive_files(
                         cell_data.pos + cell_data.size / 2.0,
                     );
 
-                    let entity = commands.spawn((cell_data, buffer, aabb)).id();
+                    let entity = commands
+                        .spawn((cell_data, buffer, aabb, Visibility::new(true)))
+                        .id();
                     cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
                 }
                 Ok(None) => {
