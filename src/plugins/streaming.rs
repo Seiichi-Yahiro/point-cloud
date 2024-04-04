@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemId, SystemState};
@@ -148,90 +150,88 @@ fn receive_files(
     mut cells: ResMut<Cells>,
     one_shot_systems: Res<OneShotSystems>,
 ) {
-    match channels.loaded_receiver.try_recv() {
-        Ok(LoadedFile::Metadata { source, metadata }) => match metadata {
-            Ok(metadata) => {
-                log::debug!(
-                    "Loaded metadata for {} with {} points",
-                    metadata.name,
-                    metadata.number_of_points
-                );
+    for _ in 0..Cells::MAX_LOADING_SIZE {
+        match channels.loaded_receiver.try_recv() {
+            Ok(LoadedFile::Metadata { source, metadata }) => match metadata {
+                Ok(metadata) => {
+                    log::debug!(
+                        "Loaded metadata for {} with {} points",
+                        metadata.name,
+                        metadata.number_of_points
+                    );
 
-                commands.run_system(one_shot_systems.look_at_bounding_box);
+                    commands.run_system(one_shot_systems.look_at_bounding_box);
 
-                *active_metadata = ActiveMetadata::Loaded { metadata, source };
+                    *active_metadata = ActiveMetadata::Loaded { metadata, source };
 
-                cells.should_load.clear();
+                    cells.should_load.clear();
 
-                for (_, status) in cells.loaded.drain() {
-                    match status {
-                        LoadedCellStatus::Missing => {}
-                        LoadedCellStatus::Loaded(entity) => {
-                            commands.entity(entity).despawn();
+                    for (_, status) in cells.loaded.drain() {
+                        match status {
+                            LoadedCellStatus::Missing => {}
+                            LoadedCellStatus::Loaded(entity) => {
+                                commands.entity(entity).despawn();
+                            }
                         }
+                    }
+                    return;
+                }
+                Err(err) => {
+                    log::error!("Failed to load metadata: {:?}", err);
+                    return;
+                }
+            },
+            Ok(LoadedFile::Cell { id, cell }) => {
+                cells.loading.pop_front();
+
+                match cell {
+                    Ok(Some(cell)) => {
+                        log::debug!("Loaded cell: {:?}", id);
+
+                        let points = cell
+                            .points()
+                            .iter()
+                            .map(|it| crate::plugins::render::point::Point {
+                                position: Vec3::new(it.pos.x, it.pos.z, -it.pos.y),
+                                color: it.color,
+                            })
+                            .collect_vec();
+
+                        let buffer = VertexBuffer::new(&device, &points);
+                        let header = cell.header();
+                        let cell_data = CellData {
+                            id,
+                            pos: Vec3::new(header.pos.x, header.pos.z, -header.pos.y),
+                            size: header.size,
+                        };
+
+                        let aabb = Aabb::new(
+                            cell_data.pos - cell_data.size / 2.0,
+                            cell_data.pos + cell_data.size / 2.0,
+                        );
+
+                        let entity = commands
+                            .spawn((cell_data, buffer, aabb, Visibility::new(true)))
+                            .id();
+                        cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
+                    }
+                    Ok(None) => {
+                        log::debug!("Cell is missing: {:?}", id);
+                        cells.loaded.insert(id, LoadedCellStatus::Missing);
+                    }
+                    Err(err) => {
+                        // TODO do something with the failed cell
+                        log::error!("Failed to load cell {:?}: {:?}", id, err);
                     }
                 }
             }
-            Err(err) => {
-                log::error!("Failed to load metadata: {:?}", err);
+            Err(TryRecvError::Disconnected) => {
+                panic!("Failed to stream files as the sender was dropped");
             }
-        },
-        Ok(LoadedFile::Cell { id, cell }) => {
-            cells.loading = None;
-
-            if !cells.should_load.remove(&id) {
-                log::debug!(
-                    "Cell {:?} was no longer needed after it finished loading",
-                    id
-                );
+            Err(TryRecvError::Empty) => {
                 return;
             }
-
-            match cell {
-                Ok(Some(cell)) => {
-                    log::debug!("Loaded cell: {:?}", id);
-
-                    let points = cell
-                        .points()
-                        .iter()
-                        .map(|it| crate::plugins::render::point::Point {
-                            position: Vec3::new(it.pos.x, it.pos.z, -it.pos.y),
-                            color: it.color,
-                        })
-                        .collect_vec();
-
-                    let buffer = VertexBuffer::new(&device, &points);
-                    let header = cell.header();
-                    let cell_data = CellData {
-                        id,
-                        pos: Vec3::new(header.pos.x, header.pos.z, -header.pos.y),
-                        size: header.size,
-                    };
-
-                    let aabb = Aabb::new(
-                        cell_data.pos - cell_data.size / 2.0,
-                        cell_data.pos + cell_data.size / 2.0,
-                    );
-
-                    let entity = commands
-                        .spawn((cell_data, buffer, aabb, Visibility::new(true)))
-                        .id();
-                    cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
-                }
-                Ok(None) => {
-                    log::debug!("Cell is missing: {:?}", id);
-                    cells.loaded.insert(id, LoadedCellStatus::Missing);
-                }
-                Err(err) => {
-                    // TODO do something with the failed cell
-                    log::error!("Failed to load cell {:?}: {:?}", id, err);
-                }
-            }
         }
-        Err(TryRecvError::Disconnected) => {
-            panic!("Failed to stream files as the sender was dropped");
-        }
-        Err(TryRecvError::Empty) => {}
     }
 }
 
@@ -240,13 +240,18 @@ fn trigger_cell_loading(
     active_metadata: ActiveMetadataRes,
     channels: ChannelsRes,
 ) {
-    if cells.loading.is_some() {
-        return;
-    }
+    if let ActiveMetadata::Loaded { metadata, source } = &*active_metadata {
+        let free_load_slots = Cells::MAX_LOADING_SIZE - cells.loading.len();
 
-    if let Some(id) = cells.should_load.iter().copied().next() {
-        if let ActiveMetadata::Loaded { metadata, source } = &*active_metadata {
-            cells.loading = Some(id);
+        for id in cells
+            .should_load
+            .iter()
+            .copied()
+            .take(free_load_slots)
+            .collect_vec()
+        {
+            cells.should_load.remove(&id);
+            cells.loading.push_back(id);
 
             channels
                 .load_sender
@@ -266,11 +271,25 @@ enum LoadedCellStatus {
     Loaded(Entity),
 }
 
-#[derive(Default, Resource)]
+#[derive(Resource)]
 struct Cells {
     loaded: FxHashMap<CellId, LoadedCellStatus>,
     should_load: FxHashSet<CellId>,
-    loading: Option<CellId>,
+    loading: VecDeque<CellId>,
+}
+
+impl Cells {
+    const MAX_LOADING_SIZE: usize = 10;
+}
+
+impl Default for Cells {
+    fn default() -> Self {
+        Self {
+            loaded: FxHashMap::default(),
+            should_load: FxHashSet::default(),
+            loading: VecDeque::with_capacity(Self::MAX_LOADING_SIZE),
+        }
+    }
 }
 
 fn update_cells(
@@ -366,7 +385,6 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
 
         ui.label(format!("Loaded cells: {}", cells.loaded.len()));
         ui.label(format!("Cells to load: {}", cells.should_load.len()));
-        ui.label(format!("Is loading: {}", cells.loading.is_some()));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
