@@ -4,6 +4,8 @@ use std::path::Path;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use glam::{IVec3, UVec3, Vec3};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use rustc_hash::FxHashSet;
 
 use crate::metadata::Metadata;
@@ -109,6 +111,8 @@ impl Cell {
             BuildHasherDefault::default(),
         );
 
+        self.points.shuffle(&mut thread_rng());
+
         let (points, overflow) = std::mem::take(&mut self.points)
             .into_iter()
             .partition(|point| {
@@ -209,6 +213,7 @@ pub struct Header {
     pub size: f32,
 
     /// The position of the cell in the world.
+    /// This is the center of the cell.
     pub pos: Vec3,
 }
 
