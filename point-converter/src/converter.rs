@@ -147,7 +147,7 @@ impl Converter {
         Ok(())
     }
 
-    fn save_cache(&self) -> Result<(), std::io::Error> {
+    pub fn save_cache(&self) -> Result<(), std::io::Error> {
         for (cell_id, cell) in &self.cell_cache {
             Self::save_cell(&cell_id.path(&self.working_directory), cell)?;
         }
@@ -155,7 +155,7 @@ impl Converter {
         Ok(())
     }
 
-    fn save_metadata(&self) -> Result<(), std::io::Error> {
+    pub fn save_metadata(&self) -> Result<(), std::io::Error> {
         let path = self
             .working_directory
             .join("metadata")
@@ -168,8 +168,10 @@ impl Converter {
 
         Ok(())
     }
+}
 
-    pub fn finish(self) {
+impl Drop for Converter {
+    fn drop(&mut self) {
         self.save_cache().unwrap();
         self.save_metadata().unwrap();
     }

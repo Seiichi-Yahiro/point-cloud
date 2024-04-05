@@ -37,8 +37,6 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
         }
     }
 
-    converter.finish();
-
     log::info!(
         "Finished converting after {} ms",
         total_instant.elapsed().as_millis()
