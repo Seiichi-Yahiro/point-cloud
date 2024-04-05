@@ -5,13 +5,26 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+path = "src/main.rs"
+name = "point_converter"
+
+[lib]
+path = "src/lib.rs"
+name = "point_converter"
+
 [dependencies]
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 glam = { version = "0.27.0", features = ["serde"] }
 log = "0.4.21"
+env_logger = "0.11.3"
 byteorder = "1.5.0"
 caches = "0.2.8"
 rustc-hash = "1.1.0"
 itertools = "0.12.1"
 rand = "0.8.5"
+clap = { version = "4.5.4", features = ["derive"] }
+clap_derive = "4.5.4"
+las = { version = "0.8.3", features = ["laz"] }
+ply-rs = "0.1.3"

@@ -11,6 +11,15 @@ pub struct Point {
     pub color: [u8; 4],
 }
 
+impl Default for Point {
+    fn default() -> Self {
+        Self {
+            pos: Vec3::ZERO,
+            color: [0, 0, 0, 255],
+        }
+    }
+}
+
 impl Point {
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
         writer.write_f32::<BigEndian>(self.pos.x)?;
@@ -39,5 +48,82 @@ impl Point {
             pos: Vec3::new(x, y, z),
             color: [r, g, b, a],
         })
+    }
+}
+
+impl ply_rs::ply::PropertyAccess for Point {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn set_property(&mut self, property_name: String, property: ply_rs::ply::Property) {
+        use ply_rs::ply::Property;
+
+        match property_name.as_ref() {
+            "x" => match property {
+                Property::Float(v) => {
+                    self.pos.x = v;
+                }
+                Property::Double(v) => {
+                    self.pos.x = v as f32;
+                }
+                _ => {}
+            },
+            "y" => match property {
+                Property::Float(v) => {
+                    self.pos.y = v;
+                }
+                Property::Double(v) => {
+                    self.pos.y = v as f32;
+                }
+                _ => {}
+            },
+            "z" => match property {
+                Property::Float(v) => {
+                    self.pos.z = v;
+                }
+                Property::Double(v) => {
+                    self.pos.z = v as f32;
+                }
+                _ => {}
+            },
+            "red" | "r" => match property {
+                Property::UChar(v) => {
+                    self.color[0] = v;
+                }
+                Property::Float(v) => {
+                    self.color[0] = (v / 255.0) as u8;
+                }
+                _ => {}
+            },
+            "green" | "g" => match property {
+                Property::UChar(v) => {
+                    self.color[1] = v;
+                }
+                Property::Float(v) => {
+                    self.color[1] = (v / 255.0) as u8;
+                }
+                _ => {}
+            },
+            "blue" | "b" => match property {
+                Property::UChar(v) => {
+                    self.color[2] = v;
+                }
+                Property::Float(v) => {
+                    self.color[2] = (v / 255.0) as u8;
+                }
+                _ => {}
+            },
+            "alpha" | "a" => match property {
+                Property::UChar(v) => {
+                    self.color[3] = v;
+                }
+                Property::Float(v) => {
+                    self.color[3] = (v / 255.0) as u8;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
     }
 }
