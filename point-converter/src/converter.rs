@@ -42,7 +42,7 @@ impl Converter {
     fn add_point_in_hierarchy(&mut self, point: Point, hierarchy: u32) {
         let cell_size = self.metadata.cell_size(hierarchy);
         let cell_index = self.metadata.cell_index(point.pos, cell_size);
-        let cell_pos = cell_index.as_vec3() * cell_size;
+        let cell_pos = cell_index.as_vec3() * cell_size + cell_size / 2.0;
 
         let cell_id = CellId {
             hierarchy,

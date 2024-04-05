@@ -48,7 +48,7 @@ impl Metadata {
     }
 
     pub fn cell_index(&self, pos: Vec3, cell_size: f32) -> IVec3 {
-        (pos / cell_size).round().as_ivec3()
+        (pos / cell_size).floor().as_ivec3()
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> serde_json::Result<()> {
@@ -77,7 +77,7 @@ impl Default for Metadata {
             hierarchies: 0,
             bounding_box: BoundingBox::default(),
             sub_grid_dimension: 128,
-            cell_point_overflow_limit: 30_000,
+            cell_point_overflow_limit: 50_000,
             cell_point_limit: 100_000,
         }
     }
