@@ -196,7 +196,7 @@ fn toggle_bounding_box(
 ) {
     if *show {
         if let Some(metadata) = active_metadata.metadata() {
-            let aabb = metadata.bounding_box.flip_yz();
+            let aabb = metadata.bounding_box;
             let lines = line_box(
                 [255, 0, 0, 255],
                 (aabb.min + aabb.max) / 2.0,

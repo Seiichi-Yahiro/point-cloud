@@ -114,7 +114,8 @@ fn setup(
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
 ) {
     let transform =
-        Transform::from_translation(Vec3::new(0.0, 0.0, 2.0)).looking_at(Vec3::ZERO, Vec3::Y);
+        Transform::from_translation(Vec3::new(0.0, -1.0, 0.0)).looking_at(Vec3::ZERO, Vec3::Z);
+
     let projection = PerspectiveProjection::default();
 
     let view_projection_uniform = {

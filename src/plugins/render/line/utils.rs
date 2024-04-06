@@ -13,15 +13,15 @@ pub fn line_strip(color: [u8; 4], points: &[Vec3]) -> Vec<Line> {
 }
 
 pub fn line_box(color: [u8; 4], pos: Vec3, half_extends: Vec3) -> Vec<Line> {
-    let near_top_left = pos + Vec3::new(-half_extends.x, half_extends.y, half_extends.z);
-    let near_top_right = pos + Vec3::new(half_extends.x, half_extends.y, half_extends.z);
-    let near_bottom_left = pos + Vec3::new(-half_extends.x, -half_extends.y, half_extends.z);
-    let near_bottom_right = pos + Vec3::new(half_extends.x, -half_extends.y, half_extends.z);
+    let near_top_left = pos + Vec3::new(-half_extends.x, -half_extends.y, half_extends.z);
+    let near_top_right = pos + Vec3::new(half_extends.x, -half_extends.y, half_extends.z);
+    let near_bottom_left = pos + Vec3::new(-half_extends.x, -half_extends.y, -half_extends.z);
+    let near_bottom_right = pos + Vec3::new(half_extends.x, -half_extends.y, -half_extends.z);
 
-    let far_top_left = pos + Vec3::new(-half_extends.x, half_extends.y, -half_extends.z);
-    let far_top_right = pos + Vec3::new(half_extends.x, half_extends.y, -half_extends.z);
-    let far_bottom_left = pos + Vec3::new(-half_extends.x, -half_extends.y, -half_extends.z);
-    let far_bottom_right = pos + Vec3::new(half_extends.x, -half_extends.y, -half_extends.z);
+    let far_top_left = pos + Vec3::new(-half_extends.x, half_extends.y, half_extends.z);
+    let far_top_right = pos + Vec3::new(half_extends.x, half_extends.y, half_extends.z);
+    let far_bottom_left = pos + Vec3::new(-half_extends.x, half_extends.y, -half_extends.z);
+    let far_bottom_right = pos + Vec3::new(half_extends.x, half_extends.y, -half_extends.z);
 
     [
         (near_top_left, near_top_right),

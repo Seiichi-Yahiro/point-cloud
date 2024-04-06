@@ -192,7 +192,7 @@ fn receive_files(
                             .points()
                             .iter()
                             .map(|it| crate::plugins::render::point::Point {
-                                position: Vec3::new(it.pos.x, it.pos.z, -it.pos.y),
+                                position: it.pos,
                                 color: it.color,
                             })
                             .collect_vec();
@@ -201,7 +201,7 @@ fn receive_files(
                         let header = cell.header();
                         let cell_data = CellData {
                             id,
-                            pos: Vec3::new(header.pos.x, header.pos.z, -header.pos.y),
+                            pos: header.pos,
                             size: header.size,
                         };
 
@@ -328,7 +328,7 @@ fn update_cells(
                 let ids = (min_cell_index.x..=max_cell_index.x)
                     .cartesian_product(min_cell_index.y..=max_cell_index.y)
                     .cartesian_product(min_cell_index.z..=max_cell_index.z)
-                    .map(|((x, y), z)| IVec3::new(x, -z, y))
+                    .map(|((x, y), z)| IVec3::new(x, y, z))
                     .map(move |index| CellId { index, hierarchy });
 
                 // copy or insert cells that need to be loaded
@@ -362,14 +362,14 @@ fn look_at_bounding_box(
     active_metadata: ActiveMetadataRes,
 ) {
     if let Some(metadata) = active_metadata.metadata() {
-        let aabb = metadata.bounding_box.flip_yz();
+        let aabb = metadata.bounding_box;
         let center = (aabb.min + aabb.max) / 2.0;
 
-        let center_max_y = center.with_y(aabb.max.y);
+        let center_max_z = center.with_z(aabb.max.z);
 
         for mut transform in query.iter_mut() {
-            *transform = Transform::from_translation(aabb.max + (center_max_y - aabb.max) / 2.0)
-                .looking_at(center, Vec3::Y);
+            *transform = Transform::from_translation(aabb.max + (center_max_z - aabb.max) / 2.0)
+                .looking_at(center, Vec3::Z);
         }
     }
 }
