@@ -17,7 +17,7 @@ use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
+use crate::plugins::streaming::loader::{LoadedCell, LoadedMetadata, LoadFile, spawn_loader};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -54,13 +54,17 @@ impl Plugin for StreamingPlugin {
         });
 
         let (load_sender, load_receiver) = flume::unbounded::<LoadFile>();
-        let (loaded_sender, loaded_receiver) = flume::unbounded::<LoadedFile>();
+        let (loaded_metadata_sender, loaded_metadata_receiver) =
+            flume::bounded::<LoadedMetadata>(1);
+        let (loaded_cell_sender, loaded_cell_receiver) =
+            flume::bounded::<LoadedCell>(Cells::MAX_LOADING_SIZE);
 
-        spawn_loader(load_receiver, loaded_sender);
+        spawn_loader(load_receiver, loaded_metadata_sender, loaded_cell_sender);
 
         let channels = Channels {
             load_sender,
-            loaded_receiver,
+            loaded_metadata_receiver,
+            loaded_cell_receiver,
         };
 
         cfg_if! {
@@ -74,7 +78,9 @@ impl Plugin for StreamingPlugin {
         app.insert_resource(Cells::default())
             .add_systems(
                 PreUpdate,
-                receive_files.run_if(|settings: Res<Settings>| !settings.pause_streaming),
+                (receive_metadata, receive_cell)
+                    .chain()
+                    .run_if(|settings: Res<Settings>| !settings.pause_streaming),
             )
             .add_systems(
                 PostUpdate,
@@ -127,7 +133,8 @@ pub enum Source {
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
 struct Channels {
     load_sender: flume::Sender<LoadFile>,
-    loaded_receiver: flume::Receiver<LoadedFile>,
+    loaded_metadata_receiver: flume::Receiver<LoadedMetadata>,
+    loaded_cell_receiver: flume::Receiver<LoadedCell>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -142,47 +149,69 @@ impl Drop for Channels {
     }
 }
 
-fn receive_files(
+fn receive_metadata(
     mut commands: Commands,
     channels: ChannelsRes,
     mut active_metadata: ActiveMetadataResMut,
-    device: Res<Device>,
-    mut cells: ResMut<Cells>,
     one_shot_systems: Res<OneShotSystems>,
+    mut cells: ResMut<Cells>,
 ) {
-    for _ in 0..Cells::MAX_LOADING_SIZE {
-        match channels.loaded_receiver.try_recv() {
-            Ok(LoadedFile::Metadata { source, metadata }) => match metadata {
-                Ok(metadata) => {
-                    log::debug!(
-                        "Loaded metadata for {} with {} points",
-                        metadata.name,
-                        metadata.number_of_points
-                    );
+    match channels.loaded_metadata_receiver.try_recv() {
+        Ok(LoadedMetadata { source, metadata }) => match metadata {
+            Ok(metadata) => {
+                log::debug!(
+                    "Loaded metadata for {} with {} points",
+                    metadata.name,
+                    metadata.number_of_points
+                );
 
-                    commands.run_system(one_shot_systems.look_at_bounding_box);
+                commands.run_system(one_shot_systems.look_at_bounding_box);
 
-                    *active_metadata = ActiveMetadata::Loaded { metadata, source };
+                *active_metadata = ActiveMetadata::Loaded { metadata, source };
 
-                    cells.should_load.clear();
+                cells.should_load.clear();
+                cells.loading.clear();
 
-                    for (_, status) in cells.loaded.drain() {
-                        match status {
-                            LoadedCellStatus::Missing => {}
-                            LoadedCellStatus::Loaded(entity) => {
-                                commands.entity(entity).despawn();
-                            }
+                for (_, status) in cells.loaded.drain() {
+                    match status {
+                        LoadedCellStatus::Missing => {}
+                        LoadedCellStatus::Loaded(entity) => {
+                            commands.entity(entity).despawn();
                         }
                     }
-                    return;
                 }
-                Err(err) => {
-                    log::error!("Failed to load metadata: {:?}", err);
-                    return;
+            }
+            Err(err) => {
+                log::error!("Failed to load metadata: {:?}", err);
+            }
+        },
+        Err(TryRecvError::Disconnected) => {
+            panic!("Failed to stream files as the sender was dropped");
+        }
+        Err(TryRecvError::Empty) => {}
+    }
+}
+
+fn receive_cell(
+    mut commands: Commands,
+    channels: ChannelsRes,
+    device: Res<Device>,
+    mut cells: ResMut<Cells>,
+) {
+    for _ in 0..Cells::MAX_LOADING_SIZE {
+        match channels.loaded_cell_receiver.try_recv() {
+            Ok(LoadedCell { id, cell }) => {
+                match cells.loading.pop_front() {
+                    Some(queued_id) => {
+                        if queued_id != id {
+                            cells.loading.push_front(queued_id);
+                            return;
+                        }
+                    }
+                    None => {
+                        return;
+                    }
                 }
-            },
-            Ok(LoadedFile::Cell { id, cell }) => {
-                cells.loading.pop_front();
 
                 match cell {
                     Ok(Some(cell)) => {

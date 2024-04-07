@@ -23,19 +23,23 @@ type LoadedFileError = std::io::Error;
 type LoadedFileError = js_sys::Error;
 
 #[derive(Debug)]
-pub enum LoadedFile {
-    Metadata {
-        source: Source,
-        metadata: Result<Metadata, LoadedFileError>,
-    },
-    Cell {
-        id: CellId,
-        cell: Result<Option<Cell>, LoadedFileError>,
-    },
+pub struct LoadedMetadata {
+    pub source: Source,
+    pub metadata: Result<Metadata, LoadedFileError>,
+}
+
+#[derive(Debug)]
+pub struct LoadedCell {
+    pub id: CellId,
+    pub cell: Result<Option<Cell>, LoadedFileError>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<LoadedFile>) {
+pub fn spawn_loader(
+    receiver: flume::Receiver<LoadFile>,
+    metadata_sender: flume::Sender<LoadedMetadata>,
+    cell_sender: flume::Sender<LoadedCell>,
+) {
     log::debug!("Spawning loader thread");
 
     std::thread::spawn(move || loop {
@@ -51,8 +55,8 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
                     }
                 };
 
-                sender
-                    .send(LoadedFile::Metadata {
+                metadata_sender
+                    .send(LoadedMetadata {
                         metadata: load_result,
                         source,
                     })
@@ -67,8 +71,8 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
 
                 match Cell::from_path(path, sub_grid_dimension) {
                     Ok(cell) => {
-                        sender
-                            .send(LoadedFile::Cell {
+                        cell_sender
+                            .send(LoadedCell {
                                 cell: Ok(Some(cell)),
                                 id,
                             })
@@ -80,8 +84,8 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
                             _ => Err(err),
                         };
 
-                        sender
-                            .send(LoadedFile::Cell {
+                        cell_sender
+                            .send(LoadedCell {
                                 cell: load_result,
                                 id,
                             })
