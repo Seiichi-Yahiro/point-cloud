@@ -14,7 +14,7 @@ use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
 use crate::plugins::camera::{Camera, Visibility};
-use crate::plugins::camera::frustum::Aabb;
+use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::loader::{LoadedFile, LoadFile, spawn_loader};
@@ -294,12 +294,12 @@ impl Default for Cells {
 
 fn update_cells(
     mut commands: Commands,
-    camera_query: Query<(Ref<Transform>, Ref<PerspectiveProjection>), With<Camera>>,
+    camera_query: Query<(&Transform, &PerspectiveProjection, Ref<Frustum>), With<Camera>>,
     active_metadata: ActiveMetadataRes,
     mut cells: ResMut<Cells>,
 ) {
-    if let Ok((transform, projection)) = camera_query.get_single() {
-        if !(transform.is_changed() || projection.is_changed() || active_metadata.is_changed()) {
+    if let Ok((transform, projection, frustum)) = camera_query.get_single() {
+        if !(frustum.is_changed() || active_metadata.is_changed()) {
             return;
         }
 
@@ -308,20 +308,12 @@ fn update_cells(
             let mut new_loading = FxHashSet::with_capacity(cells.should_load.capacity());
 
             for hierarchy in 0..metadata.hierarchies {
-                let far = projection.far / 2u32.pow(hierarchy) as f32;
-                let fov_y = projection.fov_y;
-                let aspect_ratio = projection.aspect_ratio;
-
-                let half_height_far = far * (fov_y * 0.5).tan();
-                let half_width_far = half_height_far * aspect_ratio;
-
-                let far_radius =
-                    ((half_width_far * 2.0).powi(2) + (half_height_far * 2.0).powi(2)).sqrt() / 2.0;
-
-                let radius = far_radius.max(far / 2.0) * 1.2;
-                let pos = transform.translation + transform.forward() * radius / 2.0;
-
                 let cell_size = metadata.cell_size(hierarchy);
+
+                let radius = cell_size;
+                let pos =
+                    transform.translation + transform.forward() * (projection.near + radius / 2.0);
+
                 let min_cell_index = metadata.cell_index(pos - radius, cell_size);
                 let max_cell_index = metadata.cell_index(pos + radius, cell_size);
 
