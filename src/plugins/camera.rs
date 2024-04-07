@@ -261,10 +261,15 @@ fn write_viewport_uniform(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
-    ui.label("Frustum culling:");
+    let mut query = world.query::<(&mut Camera, &Transform)>();
+    for (mut camera, transform) in query.iter_mut(world) {
+        ui.label("Position:");
+        ui.label(format!("x: {}", transform.translation.x));
+        ui.label(format!("y: {}", transform.translation.y));
+        ui.label(format!("z: {}", transform.translation.z));
 
-    let mut query = world.query::<&mut Camera>();
-    for mut camera in query.iter_mut(world) {
+        ui.label("Frustum culling:");
+
         let mut enabled = camera.frustum_cull_settings.enabled;
         if ui.checkbox(&mut enabled, "Enabled").changed() {
             camera.frustum_cull_settings.enabled = enabled;
