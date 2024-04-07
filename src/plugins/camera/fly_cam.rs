@@ -1,6 +1,6 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use glam::{Quat, Vec3};
+use glam::{EulerRot, Quat, Vec3};
 use winit::event::{MouseButton, MouseScrollDelta};
 use winit::keyboard::KeyCode;
 
@@ -110,10 +110,16 @@ fn update(
                 let relative_yaw = -cursor_event.delta.x as f32 * fly_cam.mouse_sensitivity;
                 let relative_pitch = -cursor_event.delta.y as f32 * fly_cam.mouse_sensitivity;
 
-                // TODO prevent turning upside down
-                transform.rotation = Quat::from_rotation_z(relative_yaw)
-                    * Quat::from_axis_angle(transform.right(), relative_pitch)
-                    * transform.rotation;
+                transform.rotation *= Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+
+                let (yaw, pitch, _roll) = transform.rotation.to_euler(EulerRot::ZXY);
+
+                let new_yaw = yaw + relative_yaw;
+                let new_pitch = (pitch + relative_pitch).clamp(-1.54, 1.54);
+
+                transform.rotation = Quat::from_euler(EulerRot::ZXY, new_yaw, new_pitch, 0.0);
+
+                transform.rotation *= Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
             }
         } else {
             cursor_events.clear();
