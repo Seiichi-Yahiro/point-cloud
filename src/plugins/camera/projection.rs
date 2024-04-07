@@ -20,7 +20,7 @@ impl Default for PerspectiveProjection {
         Self {
             fov_y: std::f32::consts::FRAC_PI_4,
             aspect_ratio: 1.0,
-            near: 0.1,
+            near: 1.0,
             far: 1000.0,
         }
     }
