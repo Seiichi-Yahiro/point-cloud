@@ -112,7 +112,11 @@ pub fn spawn_loader(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<LoadedFile>) {
+pub fn spawn_loader(
+    receiver: flume::Receiver<LoadFile>,
+    metadata_sender: flume::Sender<LoadedMetadata>,
+    cell_sender: flume::Sender<LoadedCell>,
+) {
     log::debug!("Spawning async loader task");
 
     wasm_bindgen_futures::spawn_local(async move {
@@ -126,8 +130,8 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
                         }
                     };
 
-                    sender
-                        .send(LoadedFile::Metadata {
+                    metadata_sender
+                        .send(LoadedMetadata {
                             metadata: load_result,
                             source,
                         })
@@ -139,8 +143,8 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
                     source: Source::Directory(dir),
                 }) => match load_cell(id, sub_grid_dimension, dir).await {
                     Ok(cell) => {
-                        sender
-                            .send(LoadedFile::Cell {
+                        cell_sender
+                            .send(LoadedCell {
                                 id,
                                 cell: Ok(Some(cell)),
                             })
@@ -153,8 +157,8 @@ pub fn spawn_loader(receiver: flume::Receiver<LoadFile>, sender: flume::Sender<L
                             Err(err)
                         };
 
-                        sender
-                            .send(LoadedFile::Cell {
+                        cell_sender
+                            .send(LoadedCell {
                                 id,
                                 cell: load_result,
                             })

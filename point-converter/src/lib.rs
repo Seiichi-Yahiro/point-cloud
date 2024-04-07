@@ -4,6 +4,7 @@ pub mod converter;
 pub mod metadata;
 pub mod point;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf], output: O) {
     let metadata = load_metadata(output.as_ref());
     let mut converter = converter::Converter::new(metadata, output.as_ref());
@@ -43,6 +44,7 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
     match std::fs::read(output.join("metadata").with_extension("bin")) {
         Ok(bytes) => {
@@ -56,6 +58,7 @@ fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn convert_las(path: &std::path::Path, converter: &mut converter::Converter) -> las::Result<()> {
     use las::Read;
     let mut reader = las::Reader::from_path(path)?;
@@ -85,6 +88,7 @@ fn convert_las(path: &std::path::Path, converter: &mut converter::Converter) -> 
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn convert_ply(
     path: &std::path::Path,
     converter: &mut converter::Converter,
@@ -120,6 +124,7 @@ fn convert_ply(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn log_progress(i: usize, number_of_points: usize) {
     if i % 10_000_000 == 0 {
         log::info!("{}/{}", i, number_of_points);
