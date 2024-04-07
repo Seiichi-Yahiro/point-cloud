@@ -166,11 +166,15 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         .get_single_mut(world)
         .unwrap();
 
-    ui.label("Camera speed:");
+    ui.horizontal(|ui| {
+        ui.label("Speed:");
 
-    let movement_speed = egui::DragValue::new(&mut fly_cam.movement_speed)
-        .clamp_range(FlyCamController::MIN_MOVEMENT_SPEED..=FlyCamController::MAX_MOVEMENT_SPEED)
-        .speed(FlyCamController::MOVEMENT_SPEED_STEP);
+        let movement_speed = egui::DragValue::new(&mut fly_cam.movement_speed)
+            .clamp_range(
+                FlyCamController::MIN_MOVEMENT_SPEED..=FlyCamController::MAX_MOVEMENT_SPEED,
+            )
+            .speed(FlyCamController::MOVEMENT_SPEED_STEP);
 
-    ui.add(movement_speed);
+        ui.add(movement_speed);
+    });
 }

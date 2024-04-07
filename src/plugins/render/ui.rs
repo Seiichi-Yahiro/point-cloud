@@ -87,13 +87,20 @@ fn ui(world: &mut World) {
             &world.get_resource::<Egui>().unwrap().context.clone(),
             |ui| {
                 crate::plugins::fps::draw_ui(ui, world);
-                ui.separator();
-                crate::plugins::camera::draw_ui(ui, world);
-                crate::plugins::camera::fly_cam::draw_ui(ui, world);
-                ui.separator();
-                crate::plugins::streaming::draw_ui(ui, world);
-                ui.separator();
-                crate::plugins::debug::draw_ui(ui, world);
+
+                egui::CollapsingHeader::new("Streaming")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        crate::plugins::streaming::draw_ui(ui, world);
+                    });
+
+                ui.collapsing("Camera", |ui| {
+                    crate::plugins::camera::draw_ui(ui, world);
+                });
+
+                ui.collapsing("Debug", |ui| {
+                    crate::plugins::debug::draw_ui(ui, world);
+                });
             },
         );
 }

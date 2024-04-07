@@ -396,18 +396,6 @@ fn look_at_bounding_box(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
-    {
-        let mut settings = world.get_resource_mut::<Settings>().unwrap();
-        ui.checkbox(&mut settings.pause_streaming, "Pause streaming");
-    }
-
-    {
-        let cells = world.get_resource::<Cells>().unwrap();
-
-        ui.label(format!("Loaded cells: {}", cells.loaded.len()));
-        ui.label(format!("Cells to load: {}", cells.should_load.len()));
-    }
-
     #[cfg(not(target_arch = "wasm32"))]
     if ui.button("Choose metadata...").clicked() {
         let dir = {
@@ -453,5 +441,17 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
                     .unwrap();
             }
         });
+    }
+
+    {
+        let mut settings = world.get_resource_mut::<Settings>().unwrap();
+        ui.checkbox(&mut settings.pause_streaming, "Pause streaming");
+    }
+
+    {
+        let cells = world.get_resource::<Cells>().unwrap();
+
+        ui.label(format!("Loaded cells: {}", cells.loaded.len()));
+        ui.label(format!("Cells to load: {}", cells.should_load.len()));
     }
 }

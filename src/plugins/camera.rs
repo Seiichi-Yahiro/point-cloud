@@ -263,29 +263,32 @@ fn write_viewport_uniform(
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     let mut query = world.query::<(&mut Camera, &Transform)>();
     for (mut camera, transform) in query.iter_mut(world) {
-        ui.label("Position:");
-        ui.label(format!("x: {}", transform.translation.x));
-        ui.label(format!("y: {}", transform.translation.y));
-        ui.label(format!("z: {}", transform.translation.z));
+        ui.collapsing("Position", |ui| {
+            ui.label(format!("x: {}", transform.translation.x));
+            ui.label(format!("y: {}", transform.translation.y));
+            ui.label(format!("z: {}", transform.translation.z));
+        });
 
-        ui.label("Frustum culling:");
+        ui.collapsing("Frustum culling", |ui| {
+            let mut enabled = camera.frustum_cull_settings.enabled;
+            if ui.checkbox(&mut enabled, "Enabled").changed() {
+                camera.frustum_cull_settings.enabled = enabled;
 
-        let mut enabled = camera.frustum_cull_settings.enabled;
-        if ui.checkbox(&mut enabled, "Enabled").changed() {
-            camera.frustum_cull_settings.enabled = enabled;
-
-            if !enabled {
-                camera.frustum_cull_settings.paused = false;
+                if !enabled {
+                    camera.frustum_cull_settings.paused = false;
+                }
             }
-        }
 
-        let mut paused = camera.frustum_cull_settings.paused;
-        let paused_check_box = egui::Checkbox::new(&mut paused, "Paused");
+            let mut paused = camera.frustum_cull_settings.paused;
+            let paused_check_box = egui::Checkbox::new(&mut paused, "Paused");
 
-        if ui.add_enabled(enabled, paused_check_box).changed() {
-            camera.frustum_cull_settings.paused = paused;
-        }
+            if ui.add_enabled(enabled, paused_check_box).changed() {
+                camera.frustum_cull_settings.paused = paused;
+            }
 
-        ui.label(format!("Visible cells: {}", camera.visible_entities.len()));
+            ui.label(format!("Visible cells: {}", camera.visible_entities.len()));
+        });
     }
+
+    fly_cam::draw_ui(ui, world);
 }
