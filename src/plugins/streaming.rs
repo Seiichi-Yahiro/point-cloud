@@ -396,6 +396,31 @@ fn look_at_bounding_box(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        let metadata = world.get_resource::<ActiveMetadata>().unwrap().metadata();
+
+        #[cfg(target_arch = "wasm32")]
+        let metadata = world
+            .get_non_send_resource::<ActiveMetadata>()
+            .unwrap()
+            .metadata();
+
+        if let Some(metadata) = metadata {
+            ui.label(format!("Cloud name: {}", metadata.name));
+            ui.label(format!("Points: {}", metadata.number_of_points));
+            ui.label(format!("Hierarchies: {}", metadata.hierarchies));
+
+            ui.collapsing("Extends", |ui| {
+                let extends = metadata.bounding_box.max - metadata.bounding_box.min;
+
+                ui.label(format!("x: {}", extends.x));
+                ui.label(format!("y: {}", extends.y));
+                ui.label(format!("z: {}", extends.z));
+            });
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     if ui.button("Choose metadata...").clicked() {
         let dir = {
