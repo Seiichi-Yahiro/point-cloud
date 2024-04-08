@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ops::{Deref, DerefMut};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -76,6 +77,7 @@ impl Plugin for StreamingPlugin {
         }
 
         app.insert_resource(Cells::default())
+            .add_systems(PostStartup, add_hierarchy_spheres)
             .add_systems(
                 PreUpdate,
                 (receive_metadata, receive_cell)
@@ -84,7 +86,11 @@ impl Plugin for StreamingPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (update_cells, trigger_cell_loading)
+                (
+                    update_hierarchy_spheres,
+                    update_cells,
+                    enqueue_cells_to_load,
+                )
                     .chain()
                     .run_if(|settings: Res<Settings>| !settings.pause_streaming),
             );
@@ -264,7 +270,7 @@ fn receive_cell(
     }
 }
 
-fn trigger_cell_loading(
+fn enqueue_cells_to_load(
     mut cells: ResMut<Cells>,
     active_metadata: ActiveMetadataRes,
     channels: ChannelsRes,
@@ -321,30 +327,74 @@ impl Default for Cells {
     }
 }
 
+#[derive(Debug)]
+pub struct Sphere {
+    pub pos: Vec3,
+    pub radius: f32,
+}
+
+#[derive(Debug, Component)]
+pub struct HierarchySpheres(Vec<Sphere>);
+
+impl Deref for HierarchySpheres {
+    type Target = Vec<Sphere>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for HierarchySpheres {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+fn add_hierarchy_spheres(mut commands: Commands, camera_query: Query<Entity, With<Camera>>) {
+    for entity in camera_query.iter() {
+        commands.entity(entity).insert(HierarchySpheres(Vec::new()));
+    }
+}
+
+fn update_hierarchy_spheres(
+    active_metadata: ActiveMetadataRes,
+    mut camera_query: Query<
+        (&Transform, &PerspectiveProjection, &mut HierarchySpheres),
+        (With<Camera>, Changed<Frustum>),
+    >,
+) {
+    if let Some(metadata) = active_metadata.metadata() {
+        for (transform, projection, mut hierarchy_spheres) in camera_query.iter_mut() {
+            let forward = transform.forward();
+
+            **hierarchy_spheres = (0..metadata.hierarchies)
+                .map(|hierarchy| {
+                    let radius = metadata.cell_size(hierarchy);
+                    let pos = transform.translation + forward * (projection.near + radius / 2.0);
+                    Sphere { radius, pos }
+                })
+                .collect();
+        }
+    }
+}
+
 fn update_cells(
     mut commands: Commands,
-    camera_query: Query<(&Transform, &PerspectiveProjection, Ref<Frustum>), With<Camera>>,
+    camera_query: Query<&HierarchySpheres, (With<Camera>, Changed<HierarchySpheres>)>,
     active_metadata: ActiveMetadataRes,
     mut cells: ResMut<Cells>,
 ) {
-    if let Ok((transform, projection, frustum)) = camera_query.get_single() {
-        if !(frustum.is_changed() || active_metadata.is_changed()) {
-            return;
-        }
-
-        if let Some(metadata) = active_metadata.metadata() {
+    if let Some(metadata) = active_metadata.metadata() {
+        for hierarchy_spheres in camera_query.iter() {
             let mut new_loaded = FxHashMap::with_capacity(cells.loaded.capacity());
             let mut new_loading = FxHashSet::with_capacity(cells.should_load.capacity());
 
-            for hierarchy in 0..metadata.hierarchies {
+            for (hierarchy, sphere) in hierarchy_spheres.iter().enumerate() {
+                let hierarchy = hierarchy as u32;
+
                 let cell_size = metadata.cell_size(hierarchy);
-
-                let radius = cell_size;
-                let pos =
-                    transform.translation + transform.forward() * (projection.near + radius / 2.0);
-
-                let min_cell_index = metadata.cell_index(pos - radius, cell_size);
-                let max_cell_index = metadata.cell_index(pos + radius, cell_size);
+                let min_cell_index = metadata.cell_index(sphere.pos - sphere.radius, cell_size);
+                let max_cell_index = metadata.cell_index(sphere.pos + sphere.radius, cell_size);
 
                 let ids = (min_cell_index.x..=max_cell_index.x)
                     .cartesian_product(min_cell_index.y..=max_cell_index.y)

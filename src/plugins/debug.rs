@@ -8,7 +8,7 @@ use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::render::line::Line;
 use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::{ActiveMetadataRes, CellData};
+use crate::plugins::streaming::{ActiveMetadataRes, CellData, HierarchySpheres};
 use crate::plugins::wgpu::Device;
 
 pub struct DebugPlugin;
@@ -18,12 +18,14 @@ impl Plugin for DebugPlugin {
         let toggle_frustum = app.world.register_system(toggle_frustum);
         let toggle_bounding_box = app.world.register_system(toggle_bounding_box);
         let toggle_grid = app.world.register_system(toggle_grid);
+        let toggle_streaming_hierarchy = app.world.register_system(toggle_streaming_hierarchy);
         let toggle_hierarchy = app.world.register_system(toggle_hierarchy);
 
         app.insert_resource(OneShotSystems {
             toggle_frustum,
             toggle_bounding_box,
             toggle_grid,
+            toggle_streaming_hierarchy,
             toggle_hierarchy,
         });
 
@@ -31,6 +33,10 @@ impl Plugin for DebugPlugin {
             show_frustum: false,
             show_bounding_box: false,
             grid: GridSettings {
+                show: false,
+                hierarchies: Vec::new(),
+            },
+            streaming_hierarchy_visibility: StreamingHierarchyVisibility {
                 show: false,
                 hierarchies: Vec::new(),
             },
@@ -59,6 +65,7 @@ struct OneShotSystems {
     toggle_frustum: SystemId<bool>,
     toggle_bounding_box: SystemId<bool>,
     toggle_grid: SystemId<(bool, u32)>,
+    toggle_streaming_hierarchy: SystemId<(bool, u32)>,
     toggle_hierarchy: SystemId<(bool, u32)>,
 }
 
@@ -67,6 +74,7 @@ struct State {
     show_frustum: bool,
     show_bounding_box: bool,
     grid: GridSettings,
+    streaming_hierarchy_visibility: StreamingHierarchyVisibility,
     hierarchy_visibility: HierarchyVisibility,
 }
 
@@ -77,6 +85,11 @@ struct GridSettings {
 
 struct HierarchyVisibility {
     show_all: bool,
+    hierarchies: Vec<bool>,
+}
+
+struct StreamingHierarchyVisibility {
+    show: bool,
     hierarchies: Vec<bool>,
 }
 
@@ -217,8 +230,10 @@ fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadataR
     }
 
     if let Some(metadata) = active_metadata.metadata() {
-        state.grid.hierarchies = vec![true; metadata.hierarchies as usize];
-        state.hierarchy_visibility.hierarchies = vec![true; metadata.hierarchies as usize];
+        let hierarchies = metadata.hierarchies as usize;
+        state.grid.hierarchies = vec![true; hierarchies];
+        state.streaming_hierarchy_visibility.hierarchies = vec![true; hierarchies];
+        state.hierarchy_visibility.hierarchies = vec![true; hierarchies];
     }
 }
 
@@ -274,16 +289,7 @@ fn toggle_grid(
         for (entity, cell_data) in add_query.iter() {
             if cell_data.id.hierarchy == hierarchy {
                 let lines = line_box(
-                    [
-                        255,
-                        if cell_data.id.hierarchy % 2 == 0 {
-                            180
-                        } else {
-                            90
-                        },
-                        0,
-                        255,
-                    ],
+                    [255, if hierarchy % 2 == 0 { 180 } else { 90 }, 0, 255],
                     cell_data.pos,
                     Vec3::splat(cell_data.size / 2.0),
                 );
@@ -296,6 +302,36 @@ fn toggle_grid(
         for (entity, cell_data) in remove_query.iter() {
             if cell_data.id.hierarchy == hierarchy {
                 commands.entity(entity).remove::<VertexBuffer<Line>>();
+            }
+        }
+    }
+}
+
+#[derive(Component)]
+struct StreamingHierarchyLine(u32);
+
+fn toggle_streaming_hierarchy(
+    In((show, hierarchy)): In<(bool, u32)>,
+    mut commands: Commands,
+    device: Res<Device>,
+    add_query: Query<&HierarchySpheres, With<Camera>>,
+    remove_query: Query<(Entity, &StreamingHierarchyLine)>,
+) {
+    if show {
+        for spheres in add_query.iter() {
+            let sphere = &spheres[hierarchy as usize];
+            let lines = line_box(
+                [255, 0, if hierarchy % 2 == 0 { 180 } else { 90 }, 255],
+                sphere.pos,
+                Vec3::splat(sphere.radius),
+            );
+            let buffer = VertexBuffer::new(&device, &lines);
+            commands.spawn((StreamingHierarchyLine(hierarchy), buffer));
+        }
+    } else {
+        for (entity, line) in remove_query.iter() {
+            if line.0 == hierarchy {
+                commands.entity(entity).despawn();
             }
         }
     }
@@ -357,90 +393,151 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
                 .unwrap();
         }
 
-        let id = ui.make_persistent_id("collapsing_grid_header");
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-            .show_header(ui, |ui| {
-                if ui.checkbox(&mut state.grid.show, "Grid").changed() {
-                    let toggle_grid = world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
+        draw_ui_grid(ui, world, &mut state);
+        draw_ui_streaming_hierarchy(ui, world, &mut state);
+        draw_ui_visible_hierarchies(ui, world, &mut state);
+    });
+}
 
-                    for (hierarchy, show) in state.grid.hierarchies.iter().enumerate() {
-                        if *show {
-                            world
-                                .run_system_with_input(
-                                    toggle_grid,
-                                    (state.grid.show, hierarchy as u32),
-                                )
-                                .unwrap();
-                        }
-                    }
-                }
-            })
-            .body(|ui| {
-                for (hierarchy, show) in state.grid.hierarchies.iter_mut().enumerate() {
-                    if ui.checkbox(show, hierarchy.to_string()).changed() {
-                        let toggle_grid =
-                            world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
+fn draw_ui_grid(ui: &mut egui::Ui, world: &mut World, state: &mut State) {
+    let id = ui.make_persistent_id("collapsing_grid_header");
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+        .show_header(ui, |ui| {
+            if ui.checkbox(&mut state.grid.show, "Grid").changed() {
+                let toggle_grid = world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
+
+                for (hierarchy, show) in state.grid.hierarchies.iter().enumerate() {
+                    if *show {
                         world
-                            .run_system_with_input(toggle_grid, (*show, hierarchy as u32))
+                            .run_system_with_input(toggle_grid, (state.grid.show, hierarchy as u32))
                             .unwrap();
                     }
                 }
-            });
-
-        let id = ui.make_persistent_id("collapsing_visible_hierarchies_header");
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-            .show_header(ui, |ui| {
-                if ui
-                    .checkbox(
-                        &mut state.hierarchy_visibility.show_all,
-                        "Show all hierarchies",
-                    )
-                    .changed()
-                {
-                    let toggle_hierarchy = world
-                        .get_resource::<OneShotSystems>()
-                        .unwrap()
-                        .toggle_hierarchy;
-
-                    if state.hierarchy_visibility.show_all {
-                        for hierarchy in 0..state.hierarchy_visibility.hierarchies.len() {
-                            world
-                                .run_system_with_input(toggle_hierarchy, (true, hierarchy as u32))
-                                .unwrap();
-                        }
-                    } else {
-                        for (hierarchy, show) in
-                            state.hierarchy_visibility.hierarchies.iter().enumerate()
-                        {
-                            world
-                                .run_system_with_input(toggle_hierarchy, (*show, hierarchy as u32))
-                                .unwrap();
-                        }
-                    }
+            }
+        })
+        .body(|ui| {
+            for (hierarchy, show) in state.grid.hierarchies.iter_mut().enumerate() {
+                if ui.checkbox(show, hierarchy.to_string()).changed() {
+                    let toggle_grid = world.get_resource::<OneShotSystems>().unwrap().toggle_grid;
+                    world
+                        .run_system_with_input(toggle_grid, (*show, hierarchy as u32))
+                        .unwrap();
                 }
-            })
-            .body(|ui| {
-                ui.label("Visible hierarchies:");
+            }
+        });
+}
 
-                ui.set_enabled(!state.hierarchy_visibility.show_all);
+fn draw_ui_streaming_hierarchy(ui: &mut egui::Ui, world: &mut World, state: &mut State) {
+    let id = ui.make_persistent_id("streaming_hierarchy_header");
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+        .show_header(ui, |ui| {
+            if ui
+                .checkbox(
+                    &mut state.streaming_hierarchy_visibility.show,
+                    "Streaming Hierarchies",
+                )
+                .changed()
+            {
+                let toggle_streaming_hierarchy = world
+                    .get_resource::<OneShotSystems>()
+                    .unwrap()
+                    .toggle_streaming_hierarchy;
 
                 for (hierarchy, show) in state
-                    .hierarchy_visibility
+                    .streaming_hierarchy_visibility
                     .hierarchies
-                    .iter_mut()
+                    .iter()
                     .enumerate()
                 {
-                    if ui.checkbox(show, hierarchy.to_string()).changed() {
-                        let toggle_hierarchy = world
-                            .get_resource::<OneShotSystems>()
-                            .unwrap()
-                            .toggle_hierarchy;
+                    if *show {
+                        world
+                            .run_system_with_input(
+                                toggle_streaming_hierarchy,
+                                (state.streaming_hierarchy_visibility.show, hierarchy as u32),
+                            )
+                            .unwrap();
+                    }
+                }
+            }
+        })
+        .body(|ui| {
+            for (hierarchy, show) in state
+                .streaming_hierarchy_visibility
+                .hierarchies
+                .iter_mut()
+                .enumerate()
+            {
+                if ui.checkbox(show, hierarchy.to_string()).changed() {
+                    let toggle_streaming_hierarchy = world
+                        .get_resource::<OneShotSystems>()
+                        .unwrap()
+                        .toggle_streaming_hierarchy;
 
+                    world
+                        .run_system_with_input(
+                            toggle_streaming_hierarchy,
+                            (*show, hierarchy as u32),
+                        )
+                        .unwrap();
+                }
+            }
+        });
+}
+
+fn draw_ui_visible_hierarchies(ui: &mut egui::Ui, world: &mut World, state: &mut State) {
+    let id = ui.make_persistent_id("collapsing_visible_hierarchies_header");
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+        .show_header(ui, |ui| {
+            if ui
+                .checkbox(
+                    &mut state.hierarchy_visibility.show_all,
+                    "Show all hierarchies",
+                )
+                .changed()
+            {
+                let toggle_hierarchy = world
+                    .get_resource::<OneShotSystems>()
+                    .unwrap()
+                    .toggle_hierarchy;
+
+                if state.hierarchy_visibility.show_all {
+                    for hierarchy in 0..state.hierarchy_visibility.hierarchies.len() {
+                        world
+                            .run_system_with_input(toggle_hierarchy, (true, hierarchy as u32))
+                            .unwrap();
+                    }
+                } else {
+                    for (hierarchy, show) in
+                        state.hierarchy_visibility.hierarchies.iter().enumerate()
+                    {
                         world
                             .run_system_with_input(toggle_hierarchy, (*show, hierarchy as u32))
                             .unwrap();
                     }
                 }
-            });
-    });
+            }
+        })
+        .body(|ui| {
+            ui.label("Visible hierarchies:");
+
+            ui.set_enabled(!state.hierarchy_visibility.show_all);
+
+            for (hierarchy, show) in state
+                .hierarchy_visibility
+                .hierarchies
+                .iter_mut()
+                .enumerate()
+            {
+                if ui.checkbox(show, hierarchy.to_string()).changed() {
+                    let toggle_hierarchy = world
+                        .get_resource::<OneShotSystems>()
+                        .unwrap()
+                        .toggle_hierarchy;
+
+                    world
+                        .run_system_with_input(toggle_hierarchy, (*show, hierarchy as u32))
+                        .unwrap();
+                }
+            }
+        });
 }
