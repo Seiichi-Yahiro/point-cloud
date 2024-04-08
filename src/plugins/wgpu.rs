@@ -5,7 +5,7 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use wgpu::TextureFormat;
 
-use crate::plugins::winit::Window;
+use crate::plugins::winit::{Window, WindowResized};
 
 #[derive(Resource)]
 pub struct Device(wgpu::Device);
@@ -111,12 +111,12 @@ impl WGPUPlugin {
         app.insert_resource(Surface(surface));
         app.insert_resource(SurfaceConfig(config));
 
-        app.add_systems(PreUpdate, resize_window);
+        app.add_systems(PreUpdate, resize_window.run_if(on_event::<WindowResized>()));
     }
 }
 
 fn resize_window(
-    mut window_resized_events: EventReader<crate::plugins::winit::WindowResized>,
+    mut window_resized_events: EventReader<WindowResized>,
     surface: Res<Surface>,
     mut config: ResMut<SurfaceConfig>,
     device: Res<Device>,

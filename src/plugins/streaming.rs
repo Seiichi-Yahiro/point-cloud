@@ -14,11 +14,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use point_converter::cell::CellId;
 use point_converter::metadata::Metadata;
 
-use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
+use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::loader::{LoadedCell, LoadedMetadata, LoadFile, spawn_loader};
+use crate::plugins::streaming::loader::{spawn_loader, LoadFile, LoadedCell, LoadedMetadata};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
@@ -85,14 +85,15 @@ impl Plugin for StreamingPlugin {
                     .run_if(|settings: Res<Settings>| !settings.pause_streaming),
             )
             .add_systems(
-                PostUpdate,
-                (
-                    update_hierarchy_spheres,
-                    update_cells,
-                    enqueue_cells_to_load,
-                )
+                Update,
+                (update_hierarchy_spheres, update_cells)
                     .chain()
+                    .after(UpdateFrustum)
                     .run_if(|settings: Res<Settings>| !settings.pause_streaming),
+            )
+            .add_systems(
+                PostUpdate,
+                enqueue_cells_to_load.run_if(|settings: Res<Settings>| !settings.pause_streaming),
             );
     }
 }
@@ -281,8 +282,8 @@ fn enqueue_cells_to_load(
         for id in cells
             .should_load
             .iter()
-            .copied()
             .take(free_load_slots)
+            .copied()
             .collect_vec()
         {
             cells.should_load.remove(&id);

@@ -54,17 +54,30 @@ impl Plugin for CameraPlugin {
 
         app.add_plugins(FlyCamPlugin)
             .add_systems(Startup, setup)
-            .add_systems(PreUpdate, update_aspect_ratio)
+            .add_systems(
+                PreUpdate,
+                update_aspect_ratio.run_if(on_event::<WindowResized>()),
+            )
+            .add_systems(
+                Update,
+                update_frustum.in_set(UpdateFrustum).after(CameraControlSet),
+            )
             .add_systems(
                 PostUpdate,
                 (
                     write_view_projection_uniform,
                     write_viewport_uniform.run_if(resource_changed::<SurfaceConfig>),
-                    (update_frustum, frustum_cull).chain(),
+                    frustum_cull.chain(),
                 ),
             );
     }
 }
+
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
+pub struct CameraControlSet;
+
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
+pub struct UpdateFrustum;
 
 #[derive(Resource)]
 pub struct ViewBindGroupLayout(wgpu::BindGroupLayout);

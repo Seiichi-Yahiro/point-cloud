@@ -23,7 +23,10 @@ pub struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(PreUpdate, update_depth_texture)
+            .add_systems(
+                PreUpdate,
+                update_depth_texture.run_if(on_event::<WindowResized>()),
+            )
             .configure_sets(
                 Last,
                 (

@@ -1,3 +1,4 @@
+use crate::plugins::camera::CameraControlSet;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use glam::{EulerRot, Quat, Vec3};
@@ -11,8 +12,12 @@ pub struct FlyCamPlugin;
 
 impl Plugin for FlyCamPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, update_movement_speed)
-            .add_systems(Update, update);
+        app.add_systems(
+            Update,
+            (update_movement_speed, update)
+                .in_set(CameraControlSet)
+                .chain(),
+        );
     }
 }
 
