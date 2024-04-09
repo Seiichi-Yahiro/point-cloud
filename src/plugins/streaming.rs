@@ -369,8 +369,14 @@ fn update_cells(
             let hierarchy = hierarchy as u32;
 
             let cell_size = metadata.cell_size(hierarchy);
-            let min_cell_index = metadata.cell_index(sphere.pos - sphere.radius, cell_size);
-            let max_cell_index = metadata.cell_index(sphere.pos + sphere.radius, cell_size);
+            let min_cell_index = metadata.cell_index(
+                (sphere.pos - sphere.radius).max(metadata.bounding_box.min),
+                cell_size,
+            );
+            let max_cell_index = metadata.cell_index(
+                (sphere.pos + sphere.radius).min(metadata.bounding_box.max),
+                cell_size,
+            );
 
             let ids = (min_cell_index.x..=max_cell_index.x)
                 .cartesian_product(min_cell_index.y..=max_cell_index.y)
