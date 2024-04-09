@@ -3,7 +3,6 @@ use std::ops::{Deref, DerefMut};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::{SystemId, SystemState};
 use cfg_if::cfg_if;
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::TryRecvError;
@@ -24,16 +23,6 @@ use crate::transform::Transform;
 
 mod loader;
 
-#[derive(Resource)]
-struct OneShotSystems {
-    look_at_bounding_box: SystemId,
-}
-
-#[derive(Resource)]
-struct Settings {
-    pause_streaming: bool,
-}
-
 #[derive(Component)]
 pub struct CellData {
     pub id: CellId,
@@ -45,20 +34,12 @@ pub struct StreamingPlugin;
 
 impl Plugin for StreamingPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Settings {
-            pause_streaming: false,
-        });
-        let look_at_bounding_box_system = app.world.register_system(look_at_bounding_box);
-
-        app.world.insert_resource(OneShotSystems {
-            look_at_bounding_box: look_at_bounding_box_system,
-        });
-
         let (load_sender, load_receiver) = flume::unbounded::<LoadFile>();
+
         let (loaded_metadata_sender, loaded_metadata_receiver) =
             flume::bounded::<LoadedMetadata>(1);
-        let (loaded_cell_sender, loaded_cell_receiver) =
-            flume::bounded::<LoadedCell>(Cells::MAX_LOADING_SIZE);
+
+        let (loaded_cell_sender, loaded_cell_receiver) = flume::unbounded::<LoadedCell>();
 
         spawn_loader(load_receiver, loaded_metadata_sender, loaded_cell_sender);
 
@@ -70,38 +51,69 @@ impl Plugin for StreamingPlugin {
 
         cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                app.insert_non_send_resource(ActiveMetadata::None).insert_non_send_resource(channels);
+                app.insert_non_send_resource(ActiveMetadata::default()).insert_non_send_resource(channels);
             } else {
-                app.insert_resource(ActiveMetadata::None).insert_resource(channels);
+                app.insert_resource(ActiveMetadata::default()).insert_resource(channels);
             }
         }
 
-        app.insert_resource(Cells::default())
+        app.insert_state(MetadataState::NotLoaded)
+            .insert_state(StreamState::Enabled)
+            .insert_resource(Cells::default())
             .add_systems(PostStartup, add_hierarchy_spheres)
             .add_systems(
-                PreUpdate,
-                (receive_metadata, receive_cell)
-                    .chain()
-                    .run_if(|settings: Res<Settings>| !settings.pause_streaming),
-            )
-            .add_systems(
                 Update,
-                (update_hierarchy_spheres, update_cells)
-                    .chain()
-                    .after(UpdateFrustum)
-                    .run_if(|settings: Res<Settings>| !settings.pause_streaming),
+                (
+                    receive_metadata.run_if(in_state(MetadataState::Loading)),
+                    (
+                        (receive_cell, update_hierarchy_spheres.after(UpdateFrustum)),
+                        update_cells,
+                        enqueue_cells_to_load,
+                    )
+                        .chain()
+                        .run_if(in_state(MetadataState::Loaded))
+                        .run_if(in_state(StreamState::Enabled)),
+                ),
             )
-            .add_systems(
-                PostUpdate,
-                enqueue_cells_to_load.run_if(|settings: Res<Settings>| !settings.pause_streaming),
-            );
+            .add_systems(OnEnter(MetadataState::Loaded), look_at_bounding_box)
+            .add_systems(OnExit(MetadataState::Loaded), despawn_cells);
+
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(
+            Update,
+            handle_selection.run_if(in_state(MetadataState::Selecting)),
+        );
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
+pub enum MetadataState {
+    NotLoaded,
+    #[cfg(target_arch = "wasm32")]
+    Selecting,
+    Loading,
+    Loaded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
+enum StreamState {
+    Enabled,
+    Paused,
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
-pub enum ActiveMetadata {
-    Loaded { source: Source, metadata: Metadata },
-    None,
+pub struct ActiveMetadata {
+    pub source: Source,
+    pub metadata: Metadata,
+}
+
+impl Default for ActiveMetadata {
+    fn default() -> Self {
+        Self {
+            source: Source::None,
+            metadata: Metadata::default(),
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -116,15 +128,6 @@ pub type ActiveMetadataResMut<'w> = ResMut<'w, ActiveMetadata>;
 #[cfg(target_arch = "wasm32")]
 pub type ActiveMetadataResMut<'w> = NonSendMut<'w, ActiveMetadata>;
 
-impl ActiveMetadata {
-    pub fn metadata(&self) -> Option<&Metadata> {
-        match self {
-            ActiveMetadata::Loaded { metadata, .. } => Some(metadata),
-            ActiveMetadata::None => None,
-        }
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 type Directory = std::path::PathBuf;
 
@@ -135,6 +138,7 @@ type Directory = web_sys::FileSystemDirectoryHandle;
 pub enum Source {
     Directory(Directory),
     URL,
+    None,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
@@ -156,12 +160,17 @@ impl Drop for Channels {
     }
 }
 
+fn despawn_cells(mut commands: Commands, query: Query<Entity, With<CellData>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
 fn receive_metadata(
-    mut commands: Commands,
     channels: ChannelsRes,
     mut active_metadata: ActiveMetadataResMut,
-    one_shot_systems: Res<OneShotSystems>,
     mut cells: ResMut<Cells>,
+    mut next_metadata_state: ResMut<NextState<MetadataState>>,
 ) {
     match channels.loaded_metadata_receiver.try_recv() {
         Ok(LoadedMetadata { source, metadata }) => match metadata {
@@ -172,24 +181,16 @@ fn receive_metadata(
                     metadata.number_of_points
                 );
 
-                commands.run_system(one_shot_systems.look_at_bounding_box);
-
-                *active_metadata = ActiveMetadata::Loaded { metadata, source };
+                next_metadata_state.set(MetadataState::Loaded);
+                *active_metadata = ActiveMetadata { metadata, source };
 
                 cells.should_load.clear();
                 cells.loading.clear();
-
-                for (_, status) in cells.loaded.drain() {
-                    match status {
-                        LoadedCellStatus::Missing => {}
-                        LoadedCellStatus::Loaded(entity) => {
-                            commands.entity(entity).despawn();
-                        }
-                    }
-                }
+                cells.loaded.clear();
             }
             Err(err) => {
                 log::error!("Failed to load metadata: {:?}", err);
+                next_metadata_state.set(MetadataState::NotLoaded);
             }
         },
         Err(TryRecvError::Disconnected) => {
@@ -212,10 +213,13 @@ fn receive_cell(
                     Some(queued_id) => {
                         if queued_id != id {
                             cells.loading.push_front(queued_id);
+
+                            log::debug!("Cell {:?} was loaded but no longer needed", id);
                             return;
                         }
                     }
                     None => {
+                        log::debug!("Cell {:?} was loaded but no longer needed", id);
                         return;
                     }
                 }
@@ -267,36 +271,6 @@ fn receive_cell(
             Err(TryRecvError::Empty) => {
                 return;
             }
-        }
-    }
-}
-
-fn enqueue_cells_to_load(
-    mut cells: ResMut<Cells>,
-    active_metadata: ActiveMetadataRes,
-    channels: ChannelsRes,
-) {
-    if let ActiveMetadata::Loaded { metadata, source } = &*active_metadata {
-        let free_load_slots = Cells::MAX_LOADING_SIZE - cells.loading.len();
-
-        for id in cells
-            .should_load
-            .iter()
-            .take(free_load_slots)
-            .copied()
-            .collect_vec()
-        {
-            cells.should_load.remove(&id);
-            cells.loading.push_back(id);
-
-            channels
-                .load_sender
-                .send(LoadFile::Cell {
-                    id,
-                    sub_grid_dimension: metadata.sub_grid_dimension,
-                    source: source.clone(),
-                })
-                .unwrap();
         }
     }
 }
@@ -364,18 +338,18 @@ fn update_hierarchy_spheres(
         (With<Camera>, Changed<Frustum>),
     >,
 ) {
-    if let Some(metadata) = active_metadata.metadata() {
-        for (transform, projection, mut hierarchy_spheres) in camera_query.iter_mut() {
-            let forward = transform.forward();
+    let metadata = &active_metadata.metadata;
 
-            **hierarchy_spheres = (0..metadata.hierarchies)
-                .map(|hierarchy| {
-                    let radius = metadata.cell_size(hierarchy);
-                    let pos = transform.translation + forward * (projection.near + radius / 2.0);
-                    Sphere { radius, pos }
-                })
-                .collect();
-        }
+    for (transform, projection, mut hierarchy_spheres) in camera_query.iter_mut() {
+        let forward = transform.forward();
+
+        **hierarchy_spheres = (0..metadata.hierarchies)
+            .map(|hierarchy| {
+                let radius = metadata.cell_size(hierarchy);
+                let pos = transform.translation + forward * (projection.near + radius / 2.0);
+                Sphere { radius, pos }
+            })
+            .collect();
     }
 }
 
@@ -385,47 +359,74 @@ fn update_cells(
     active_metadata: ActiveMetadataRes,
     mut cells: ResMut<Cells>,
 ) {
-    if let Some(metadata) = active_metadata.metadata() {
-        for hierarchy_spheres in camera_query.iter() {
-            let mut new_loaded = FxHashMap::with_capacity(cells.loaded.capacity());
-            let mut new_loading = FxHashSet::with_capacity(cells.should_load.capacity());
+    let metadata = &active_metadata.metadata;
 
-            for (hierarchy, sphere) in hierarchy_spheres.iter().enumerate() {
-                let hierarchy = hierarchy as u32;
+    for hierarchy_spheres in camera_query.iter() {
+        let mut new_loaded = FxHashMap::with_capacity(cells.loaded.capacity());
+        let mut new_should_load = FxHashSet::with_capacity(cells.should_load.capacity());
 
-                let cell_size = metadata.cell_size(hierarchy);
-                let min_cell_index = metadata.cell_index(sphere.pos - sphere.radius, cell_size);
-                let max_cell_index = metadata.cell_index(sphere.pos + sphere.radius, cell_size);
+        for (hierarchy, sphere) in hierarchy_spheres.iter().enumerate() {
+            let hierarchy = hierarchy as u32;
 
-                let ids = (min_cell_index.x..=max_cell_index.x)
-                    .cartesian_product(min_cell_index.y..=max_cell_index.y)
-                    .cartesian_product(min_cell_index.z..=max_cell_index.z)
-                    .map(|((x, y), z)| IVec3::new(x, y, z))
-                    .map(move |index| CellId { index, hierarchy });
+            let cell_size = metadata.cell_size(hierarchy);
+            let min_cell_index = metadata.cell_index(sphere.pos - sphere.radius, cell_size);
+            let max_cell_index = metadata.cell_index(sphere.pos + sphere.radius, cell_size);
 
-                // copy or insert cells that need to be loaded
-                for id in ids {
-                    if let Some(status) = cells.loaded.remove(&id) {
-                        new_loaded.insert(id, status);
-                    } else {
-                        cells.should_load.remove(&id);
-                        new_loading.insert(id);
-                    }
+            let ids = (min_cell_index.x..=max_cell_index.x)
+                .cartesian_product(min_cell_index.y..=max_cell_index.y)
+                .cartesian_product(min_cell_index.z..=max_cell_index.z)
+                .map(|((x, y), z)| IVec3::new(x, y, z))
+                .map(move |index| CellId { index, hierarchy });
+
+            // copy or insert cells that need to be loaded
+            for id in ids {
+                if let Some(status) = cells.loaded.remove(&id) {
+                    new_loaded.insert(id, status);
+                } else if cells.should_load.remove(&id) || !cells.loading.contains(&id) {
+                    new_should_load.insert(id);
                 }
             }
-
-            for status in cells.loaded.values() {
-                match status {
-                    LoadedCellStatus::Missing => {}
-                    LoadedCellStatus::Loaded(entity) => {
-                        commands.entity(*entity).despawn();
-                    }
-                }
-            }
-
-            cells.loaded = new_loaded;
-            cells.should_load = new_loading;
         }
+
+        for status in cells.loaded.values() {
+            match status {
+                LoadedCellStatus::Missing => {}
+                LoadedCellStatus::Loaded(entity) => {
+                    commands.entity(*entity).despawn();
+                }
+            }
+        }
+
+        cells.loaded = new_loaded;
+        cells.should_load = new_should_load;
+    }
+}
+
+fn enqueue_cells_to_load(
+    mut cells: ResMut<Cells>,
+    active_metadata: ActiveMetadataRes,
+    channels: ChannelsRes,
+) {
+    let free_load_slots = Cells::MAX_LOADING_SIZE - cells.loading.len();
+
+    for id in cells
+        .should_load
+        .iter()
+        .take(free_load_slots)
+        .copied()
+        .collect_vec()
+    {
+        cells.should_load.remove(&id);
+        cells.loading.push_back(id);
+
+        channels
+            .load_sender
+            .send(LoadFile::Cell {
+                id,
+                sub_grid_dimension: active_metadata.metadata.sub_grid_dimension,
+                source: active_metadata.source.clone(),
+            })
+            .unwrap();
     }
 }
 
@@ -433,15 +434,56 @@ fn look_at_bounding_box(
     mut query: Query<&mut Transform, With<Camera>>,
     active_metadata: ActiveMetadataRes,
 ) {
-    if let Some(metadata) = active_metadata.metadata() {
-        let aabb = metadata.bounding_box;
-        let center = (aabb.min + aabb.max) / 2.0;
+    let aabb = active_metadata.metadata.bounding_box;
+    let center = (aabb.min + aabb.max) / 2.0;
 
-        let center_max_z = center.with_z(aabb.max.z);
+    let center_max_z = center.with_z(aabb.max.z);
 
-        for mut transform in query.iter_mut() {
-            *transform = Transform::from_translation(aabb.max + (center_max_z - aabb.max) / 2.0)
-                .looking_at(center, Vec3::Z);
+    for mut transform in query.iter_mut() {
+        *transform = Transform::from_translation(aabb.max + (center_max_z - aabb.max) / 2.0)
+            .looking_at(center, Vec3::Z);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+enum MetadataSelection {
+    Load(LoadFile),
+    Canceled { had_metadata: bool },
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_selection(world: &mut World) {
+    let receiver = world
+        .remove_non_send_resource::<flume::Receiver<MetadataSelection>>()
+        .unwrap();
+
+    match receiver.try_recv() {
+        Ok(MetadataSelection::Load(load_file)) => {
+            world
+                .get_resource_mut::<NextState<MetadataState>>()
+                .unwrap()
+                .set(MetadataState::Loading);
+
+            let channels = world.get_non_send_resource::<Channels>().unwrap();
+            channels.load_sender.send(load_file).unwrap();
+        }
+        Ok(MetadataSelection::Canceled { had_metadata }) => {
+            let previous_state = if had_metadata {
+                MetadataState::Loaded
+            } else {
+                MetadataState::NotLoaded
+            };
+
+            world
+                .get_resource_mut::<NextState<MetadataState>>()
+                .unwrap()
+                .set(previous_state);
+        }
+        Err(TryRecvError::Disconnected) => {
+            panic!("Sender disconnected while waiting for metadata selection");
+        }
+        Err(TryRecvError::Empty) => {
+            world.insert_non_send_resource(receiver);
         }
     }
 }
@@ -449,31 +491,72 @@ fn look_at_bounding_box(
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     {
         #[cfg(not(target_arch = "wasm32"))]
-        let metadata = world.get_resource::<ActiveMetadata>().unwrap().metadata();
+        let metadata = &world.get_resource::<ActiveMetadata>().unwrap().metadata;
 
         #[cfg(target_arch = "wasm32")]
-        let metadata = world
+        let metadata = &world
             .get_non_send_resource::<ActiveMetadata>()
             .unwrap()
-            .metadata();
+            .metadata;
 
-        if let Some(metadata) = metadata {
-            ui.label(format!("Cloud name: {}", metadata.name));
-            ui.label(format!("Points: {}", metadata.number_of_points));
-            ui.label(format!("Hierarchies: {}", metadata.hierarchies));
+        ui.label(format!("Cloud name: {}", metadata.name));
+        ui.label(format!("Points: {}", metadata.number_of_points));
+        ui.label(format!("Hierarchies: {}", metadata.hierarchies));
 
-            ui.collapsing("Extends", |ui| {
-                let extends = metadata.bounding_box.max - metadata.bounding_box.min;
+        ui.collapsing("Extends", |ui| {
+            let extends = metadata.bounding_box.max - metadata.bounding_box.min;
 
-                ui.label(format!("x: {}", extends.x));
-                ui.label(format!("y: {}", extends.y));
-                ui.label(format!("z: {}", extends.z));
-            });
+            ui.label(format!("x: {}", extends.x));
+            ui.label(format!("y: {}", extends.y));
+            ui.label(format!("z: {}", extends.z));
+        });
+    }
+
+    select_metadata(ui, world);
+
+    {
+        let mut is_streaming_paused =
+            match *world.get_resource::<State<StreamState>>().unwrap().get() {
+                StreamState::Enabled => false,
+                StreamState::Paused => true,
+            };
+
+        if ui
+            .checkbox(&mut is_streaming_paused, "Pause streaming")
+            .changed()
+        {
+            let mut next_stream_state = world.get_resource_mut::<NextState<StreamState>>().unwrap();
+
+            let next_state = if is_streaming_paused {
+                StreamState::Paused
+            } else {
+                StreamState::Enabled
+            };
+
+            next_stream_state.set(next_state);
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    if ui.button("Choose metadata...").clicked() {
+    {
+        let cells = world.get_resource::<Cells>().unwrap();
+
+        ui.label(format!("Loaded cells: {}", cells.loaded.len()));
+        ui.label(format!("Cells to load: {}", cells.should_load.len()));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
+    let current_metadata_state = *world.get_resource::<State<MetadataState>>().unwrap().get();
+
+    let button = egui::Button::new("Choose metadata...");
+
+    let enabled = match current_metadata_state {
+        MetadataState::Loading => false,
+        MetadataState::NotLoaded | MetadataState::Loaded => true,
+    };
+
+    if ui.add_enabled(enabled, button).clicked() {
         let dir = {
             let window: &winit::window::Window = world
                 .get_resource::<crate::plugins::winit::Window>()
@@ -487,8 +570,13 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         };
 
         if let Some(dir) = dir {
-            let mut params = SystemState::<ChannelsRes>::new(world);
-            let channels = params.get(world);
+            let mut params = bevy_ecs::system::SystemState::<(
+                ChannelsRes,
+                ResMut<NextState<MetadataState>>,
+            )>::new(world);
+            let (channels, mut next_metadata_state) = params.get_mut(world);
+
+            next_metadata_state.set(MetadataState::Loading);
 
             channels
                 .load_sender
@@ -496,13 +584,38 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
                 .unwrap();
         }
     }
+}
 
-    #[cfg(target_arch = "wasm32")]
-    if ui.button("Choose dir...").clicked() {
-        let mut params = SystemState::<ChannelsRes>::new(world);
-        let channels = params.get(world);
+#[cfg(target_arch = "wasm32")]
+fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
+    let current_metadata_state = *world.get_resource::<State<MetadataState>>().unwrap().get();
 
-        let load_sender = channels.load_sender.clone();
+    let button = egui::Button::new("Choose dir...");
+    let enabled = match current_metadata_state {
+        MetadataState::Selecting | MetadataState::Loading => false,
+        MetadataState::NotLoaded | MetadataState::Loaded => true,
+    };
+
+    if ui.add_enabled(enabled, button).clicked() {
+        let mut next_metadata_state = world
+            .get_resource_mut::<NextState<MetadataState>>()
+            .unwrap();
+
+        next_metadata_state.set(MetadataState::Selecting);
+
+        let had_metadata = match current_metadata_state {
+            MetadataState::NotLoaded => false,
+            MetadataState::Selecting => {
+                unreachable!("Choosing metadata should be disabled while selecting one");
+            }
+            MetadataState::Loading => {
+                unreachable!("Choosing metadata should be disabled while loading one");
+            }
+            MetadataState::Loaded => true,
+        };
+
+        let (load_sender, load_receiver) = flume::bounded::<MetadataSelection>(1);
+        world.insert_non_send_resource(load_receiver);
 
         wasm_bindgen_futures::spawn_local(async move {
             use wasm_bindgen::JsCast;
@@ -513,21 +626,15 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
                     .unwrap();
 
                 load_sender
-                    .send(LoadFile::Metadata(Source::Directory(dir)))
+                    .send(MetadataSelection::Load(LoadFile::Metadata(
+                        Source::Directory(dir),
+                    )))
+                    .unwrap();
+            } else {
+                load_sender
+                    .send(MetadataSelection::Canceled { had_metadata })
                     .unwrap();
             }
         });
-    }
-
-    {
-        let mut settings = world.get_resource_mut::<Settings>().unwrap();
-        ui.checkbox(&mut settings.pause_streaming, "Pause streaming");
-    }
-
-    {
-        let cells = world.get_resource::<Cells>().unwrap();
-
-        ui.label(format!("Loaded cells: {}", cells.loaded.len()));
-        ui.label(format!("Cells to load: {}", cells.should_load.len()));
     }
 }

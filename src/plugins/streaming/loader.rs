@@ -35,6 +35,21 @@ pub struct LoadedCell {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn no_source_error() -> LoadedFileError {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "No source to load from provided",
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn no_source_error() -> LoadedFileError {
+    let err = js_sys::Error::new("No source to load from provided");
+    err.set_cause(&wasm_bindgen::JsValue::from_str("NotFoundError"));
+    err
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn spawn_loader(
     receiver: flume::Receiver<LoadFile>,
     metadata_sender: flume::Sender<LoadedMetadata>,
@@ -53,6 +68,7 @@ pub fn spawn_loader(
                     Source::URL => {
                         todo!()
                     }
+                    Source::None => Err(no_source_error()),
                 };
 
                 metadata_sender
@@ -99,6 +115,18 @@ pub fn spawn_loader(
             }) => {
                 todo!()
             }
+            Ok(LoadFile::Cell {
+                source: Source::None,
+                id,
+                ..
+            }) => {
+                cell_sender
+                    .send(LoadedCell {
+                        cell: Err(no_source_error()),
+                        id,
+                    })
+                    .unwrap();
+            }
             Ok(LoadFile::Stop) => {
                 log::debug!("Stopping loader thread");
                 return;
@@ -128,6 +156,7 @@ pub fn spawn_loader(
                         Source::URL => {
                             todo!()
                         }
+                        Source::None => Err(no_source_error()),
                     };
 
                     metadata_sender
@@ -170,6 +199,18 @@ pub fn spawn_loader(
                     ..
                 }) => {
                     todo!()
+                }
+                Ok(LoadFile::Cell {
+                    source: Source::None,
+                    id,
+                    ..
+                }) => {
+                    cell_sender
+                        .send(LoadedCell {
+                            cell: Err(no_source_error()),
+                            id,
+                        })
+                        .unwrap();
                 }
                 Ok(LoadFile::Stop) => {
                     log::debug!("Stopping async loader task");

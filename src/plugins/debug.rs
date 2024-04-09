@@ -3,31 +3,33 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemId;
 use glam::Vec3;
 
-use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::camera::frustum::Frustum;
-use crate::plugins::render::line::Line;
+use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::render::line::utils::{line_box, line_strip};
+use crate::plugins::render::line::Line;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::{ActiveMetadataRes, CellData, HierarchySpheres};
+use crate::plugins::streaming::{ActiveMetadataRes, CellData, HierarchySpheres, MetadataState};
 use crate::plugins::wgpu::Device;
 
 pub struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
-        let toggle_frustum = app.world.register_system(toggle_frustum);
-        let toggle_bounding_box = app.world.register_system(toggle_bounding_box);
-        let toggle_grid = app.world.register_system(toggle_grid);
-        let toggle_streaming_hierarchy = app.world.register_system(toggle_streaming_hierarchy);
-        let toggle_hierarchy = app.world.register_system(toggle_hierarchy);
+        {
+            let toggle_frustum = app.world.register_system(toggle_frustum);
+            let toggle_bounding_box = app.world.register_system(toggle_bounding_box);
+            let toggle_grid = app.world.register_system(toggle_grid);
+            let toggle_streaming_hierarchy = app.world.register_system(toggle_streaming_hierarchy);
+            let toggle_hierarchy = app.world.register_system(toggle_hierarchy);
 
-        app.insert_resource(OneShotSystems {
-            toggle_frustum,
-            toggle_bounding_box,
-            toggle_grid,
-            toggle_streaming_hierarchy,
-            toggle_hierarchy,
-        });
+            app.insert_resource(OneShotSystems {
+                toggle_frustum,
+                toggle_bounding_box,
+                toggle_grid,
+                toggle_streaming_hierarchy,
+                toggle_hierarchy,
+            });
+        }
 
         app.insert_resource(State {
             show_frustum: false,
@@ -48,14 +50,23 @@ impl Plugin for DebugPlugin {
 
         app.add_systems(
             Update,
+            (add_grid_for_new_cells, set_visibility_for_new_cells)
+                .run_if(in_state(MetadataState::Loaded)),
+        )
+        .add_systems(
+            OnEnter(MetadataState::Loaded),
             (
-                watch_metadata_change,
-                (
-                    update_hierarchies,
-                    (add_grid_for_new_cells, set_visibility_for_new_cells),
-                )
-                    .chain(),
+                update_hierarchies,
+                (|| true)
+                    .pipe(toggle_bounding_box)
+                    .run_if(|state: Res<State>| state.show_bounding_box),
             ),
+        )
+        .add_systems(
+            OnExit(MetadataState::Loaded),
+            (|| false)
+                .pipe(toggle_bounding_box)
+                .run_if(|state: Res<State>| state.show_bounding_box),
         );
     }
 }
@@ -185,18 +196,6 @@ fn toggle_frustum(
     }
 }
 
-fn watch_metadata_change(
-    mut commands: Commands,
-    one_shot_systems: Res<OneShotSystems>,
-    active_metadata: ActiveMetadataRes,
-    state: Res<State>,
-) {
-    if active_metadata.is_changed() && state.show_bounding_box {
-        commands.run_system_with_input(one_shot_systems.toggle_bounding_box, false);
-        commands.run_system_with_input(one_shot_systems.toggle_bounding_box, true);
-    }
-}
-
 #[derive(Component)]
 struct BoundingBoxLine;
 
@@ -208,15 +207,13 @@ fn toggle_bounding_box(
     bounding_box_query: Query<Entity, With<BoundingBoxLine>>,
 ) {
     if *show {
-        if let Some(metadata) = active_metadata.metadata() {
-            let aabb = metadata.bounding_box;
-            let lines = line_box(
-                [255, 0, 0, 255],
-                (aabb.min + aabb.max) / 2.0,
-                (aabb.max - aabb.min) / 2.0,
-            );
-            commands.spawn((BoundingBoxLine, VertexBuffer::new(&device, &lines)));
-        }
+        let aabb = active_metadata.metadata.bounding_box;
+        let lines = line_box(
+            [255, 0, 0, 255],
+            (aabb.min + aabb.max) / 2.0,
+            (aabb.max - aabb.min) / 2.0,
+        );
+        commands.spawn((BoundingBoxLine, VertexBuffer::new(&device, &lines)));
     } else {
         for entity in bounding_box_query.iter() {
             commands.entity(entity).despawn();
@@ -225,16 +222,10 @@ fn toggle_bounding_box(
 }
 
 fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadataRes) {
-    if !active_metadata.is_changed() {
-        return;
-    }
-
-    if let Some(metadata) = active_metadata.metadata() {
-        let hierarchies = metadata.hierarchies as usize;
-        state.grid.hierarchies = vec![true; hierarchies];
-        state.streaming_hierarchy_visibility.hierarchies = vec![true; hierarchies];
-        state.hierarchy_visibility.hierarchies = vec![true; hierarchies];
-    }
+    let hierarchies = active_metadata.metadata.hierarchies as usize;
+    state.grid.hierarchies = vec![true; hierarchies];
+    state.streaming_hierarchy_visibility.hierarchies = vec![true; hierarchies];
+    state.hierarchy_visibility.hierarchies = vec![true; hierarchies];
 }
 
 fn add_grid_for_new_cells(
