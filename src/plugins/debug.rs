@@ -8,7 +8,8 @@ use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::line::Line;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::{ActiveMetadataRes, CellData, HierarchySpheres, MetadataState};
+use crate::plugins::streaming::cell::{CellData, HierarchySpheres};
+use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 
 pub struct DebugPlugin;

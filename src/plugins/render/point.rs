@@ -3,8 +3,8 @@ use bevy_ecs::prelude::*;
 use glam::Vec3;
 
 use crate::plugins::camera::{Camera, ViewBindGroupLayout};
-use crate::plugins::render::{GlobalDepthTexture, GlobalRenderResources, RenderPassSet};
 use crate::plugins::render::vertex::VertexBuffer;
+use crate::plugins::render::{GlobalDepthTexture, GlobalRenderResources, RenderPassSet};
 use crate::plugins::wgpu::{Device, SurfaceConfig};
 use crate::texture::Texture;
 
