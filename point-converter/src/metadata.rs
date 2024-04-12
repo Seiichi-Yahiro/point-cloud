@@ -51,6 +51,10 @@ impl Metadata {
         (pos / cell_size).floor().as_ivec3()
     }
 
+    pub fn cell_spacing(&self, cell_size: f32) -> f32 {
+        (cell_size / self.sub_grid_dimension as f32) / 2.0
+    }
+
     pub fn write_to(&self, writer: &mut dyn Write) -> serde_json::Result<()> {
         serde_json::to_writer_pretty(writer, self)
     }

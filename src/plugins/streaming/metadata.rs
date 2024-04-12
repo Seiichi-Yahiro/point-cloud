@@ -11,6 +11,7 @@ use crate::plugins::streaming::Source;
 use crate::transform::Transform;
 
 mod loader;
+pub mod shader;
 
 pub struct MetadataPlugin;
 
@@ -41,12 +42,17 @@ impl Plugin for MetadataPlugin {
             app.insert_resource(ActiveMetadata::default());
         }
 
+        shader::setup(&mut app.world);
+
         app.insert_state(MetadataState::NotLoaded)
             .add_systems(
                 Update,
                 receive_metadata.run_if(in_state(MetadataState::Loading)),
             )
-            .add_systems(OnEnter(MetadataState::Loaded), look_at_bounding_box);
+            .add_systems(
+                OnEnter(MetadataState::Loaded),
+                (look_at_bounding_box, shader::write_buffer),
+            );
     }
 }
 

@@ -13,14 +13,16 @@ use point_converter::cell::CellId;
 
 use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
-use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
+use crate::plugins::camera::{Camera, FrustumCull, UpdateFrustum, Visibility};
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::loader::{spawn_cell_loader, LoadCellMsg, LoadedCellMsg};
+use crate::plugins::streaming::cell::shader::{CellBindGroupData, CellBindGroupLayout};
 use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
 mod loader;
+pub mod shader;
 
 pub struct CellPlugin;
 
@@ -42,6 +44,8 @@ impl Plugin for CellPlugin {
         #[cfg(target_arch = "wasm32")]
         app.insert_non_send_resource(channels);
 
+        shader::setup(&mut app.world);
+
         app.insert_state(StreamState::Enabled)
             .insert_resource(Cells::default())
             .add_systems(PostStartup, add_hierarchy_spheres)
@@ -56,7 +60,11 @@ impl Plugin for CellPlugin {
                     .run_if(in_state(MetadataState::Loaded))
                     .run_if(in_state(StreamState::Enabled)),
             )
-            .add_systems(OnExit(MetadataState::Loaded), cleanup_cells);
+            .add_systems(OnExit(MetadataState::Loaded), cleanup_cells)
+            .add_systems(
+                PostUpdate,
+                shader::update_visible_cells_buffer.after(FrustumCull),
+            );
     }
 }
 
@@ -158,6 +166,7 @@ fn receive_cell(
     mut commands: Commands,
     channels: ChannelsRes,
     device: Res<Device>,
+    cell_bind_group_layout: Res<CellBindGroupLayout>,
     mut cells: ResMut<Cells>,
 ) {
     for _ in 0..Cells::MAX_LOADING_SIZE {
@@ -191,7 +200,10 @@ fn receive_cell(
                             })
                             .collect_vec();
 
-                        let buffer = VertexBuffer::new(&device, &points);
+                        let vertex_buffer = VertexBuffer::new(&device, &points);
+                        let cell_bind_group_data =
+                            CellBindGroupData::new(&device, &cell_bind_group_layout, id);
+
                         let header = cell.header();
                         let cell_data = CellData {
                             id,
@@ -205,8 +217,15 @@ fn receive_cell(
                         );
 
                         let entity = commands
-                            .spawn((cell_data, buffer, aabb, Visibility::new(true)))
+                            .spawn((
+                                cell_data,
+                                vertex_buffer,
+                                cell_bind_group_data,
+                                aabb,
+                                Visibility::new(true),
+                            ))
                             .id();
+
                         cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
                     }
                     Ok(None) => {

@@ -67,7 +67,7 @@ impl Plugin for CameraPlugin {
                 (
                     write_view_projection_uniform,
                     write_viewport_uniform.run_if(resource_changed::<SurfaceConfig>),
-                    frustum_cull.chain(),
+                    frustum_cull.in_set(FrustumCull),
                 ),
             );
     }
@@ -78,6 +78,9 @@ pub struct CameraControlSet;
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
 pub struct UpdateFrustum;
+
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
+pub struct FrustumCull;
 
 #[derive(Resource)]
 pub struct ViewBindGroupLayout(wgpu::BindGroupLayout);
