@@ -13,6 +13,9 @@ struct VPUniform {
 @group(0) @binding(0)
 var<uniform> vp: VPUniform;
 
+@group(0) @binding(1)
+var<uniform> viewport: vec2<u32>; // width, height
+
 struct Metadata {
     number_of_hierarchies: u32,
     hierarchies: array<Hierarchy>
@@ -58,6 +61,7 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) splat_pos: vec2<f32>,
     @location(2) @interpolate(flat) splat_radius: f32,
+    @location(3) view_pos: vec3<f32>
 }
 
 fn get_splat_position(index: u32, radius: f32) -> vec2<f32> {
@@ -123,6 +127,7 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     let bill_board_offset = cam_right * local_splat_position.x + cam_up * local_splat_position.y;
     let billboard_position = vec4<f32>(instance.position + bill_board_offset, 1.0);
 
+    out.view_pos = (vp.view * billboard_position).xyz;
     out.clip_position = vp.view_proj * billboard_position;
     out.color = instance.color;
     out.splat_pos = local_splat_position;
@@ -131,10 +136,28 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     return out;
 }
 
+struct FragmentOutput {
+    @builtin(frag_depth) depth: f32,
+    @location(0) color: vec4<f32>,
+}
+
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+
     if (length(in.splat_pos) > in.splat_radius) {
         discard;
     }
-    return vec4<f32>(in.color);
+    
+    let normalized_splat_pos = in.splat_pos / in.splat_radius;
+    let weight = 1.0 - dot(normalized_splat_pos, normalized_splat_pos);
+    
+    let depth_offset = in.splat_radius * weight;
+    
+    let pos = vp.projection * vec4(in.view_pos.xy, in.view_pos.z + depth_offset, 1.0);
+    let z = pos.z / pos.w;
+    
+    out.color = vec4<f32>(in.color);
+    out.depth = z;
+    return out;
 }
