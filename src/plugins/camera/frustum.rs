@@ -12,6 +12,27 @@ pub struct Corners {
     pub bottom_right: Vec3,
 }
 
+impl Corners {
+    pub fn iter(&self) -> std::array::IntoIter<&Vec3, 4> {
+        [
+            &self.top_left,
+            &self.top_right,
+            &self.bottom_left,
+            &self.bottom_right,
+        ]
+        .into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Corners {
+    type Item = &'a Vec3;
+    type IntoIter = std::array::IntoIter<&'a Vec3, 4>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// Planes in Hessian normal form.
 ///
 /// ax + by + cz - d = 0\
@@ -60,42 +81,15 @@ pub struct Frustum {
 }
 
 impl Frustum {
-    pub fn new(transform: &Transform, projection: &PerspectiveProjection) -> Self {
-        let cam_pos = transform.translation;
-        let cam_forward = transform.forward();
-        let cam_right = transform.right();
-        let cam_up = transform.up();
+    pub fn new(camera_transform: &Transform, projection: &PerspectiveProjection) -> Self {
+        let near = Self::near_corners(camera_transform, projection);
+        let far = Self::far_corners(camera_transform, projection);
 
-        let slope = (projection.fov_y * 0.5).tan();
-
-        let half_height_near = projection.near * slope;
-        let half_width_near = half_height_near * projection.aspect_ratio;
-
-        let half_height_far = projection.far * slope;
-        let half_width_far = half_height_far * projection.aspect_ratio;
+        let cam_pos = camera_transform.translation;
+        let cam_forward = camera_transform.forward();
 
         let center_on_near_plane = cam_pos + projection.near * cam_forward;
         let center_on_far_plane = cam_pos + projection.far * cam_forward;
-
-        let near_up = cam_up * half_height_near;
-        let near_right = cam_right * half_width_near;
-
-        let near = Corners {
-            top_left: center_on_near_plane + near_up - near_right,
-            top_right: center_on_near_plane + near_up + near_right,
-            bottom_left: center_on_near_plane - near_up - near_right,
-            bottom_right: center_on_near_plane - near_up + near_right,
-        };
-
-        let far_up = cam_up * half_height_far;
-        let far_right = cam_right * half_width_far;
-
-        let far = Corners {
-            top_left: center_on_far_plane + far_up - far_right,
-            top_right: center_on_far_plane + far_up + far_right,
-            bottom_left: center_on_far_plane - far_up - far_right,
-            bottom_right: center_on_far_plane - far_up + far_right,
-        };
 
         let normal_near = cam_forward;
         let normal_far = -cam_forward;
@@ -130,6 +124,48 @@ impl Frustum {
                 left: left_plane,
                 right: right_plane,
             },
+        }
+    }
+
+    pub fn near_corners(
+        camera_transform: &Transform,
+        projection: &PerspectiveProjection,
+    ) -> Corners {
+        let half_height_near = projection.near * projection.slope();
+        let half_width_near = half_height_near * projection.aspect_ratio;
+
+        let near_up = camera_transform.up() * half_height_near;
+        let near_right = camera_transform.right() * half_width_near;
+
+        let center_on_near_plane =
+            camera_transform.translation + projection.near * camera_transform.forward();
+
+        Corners {
+            top_left: center_on_near_plane + near_up - near_right,
+            top_right: center_on_near_plane + near_up + near_right,
+            bottom_left: center_on_near_plane - near_up - near_right,
+            bottom_right: center_on_near_plane - near_up + near_right,
+        }
+    }
+
+    pub fn far_corners(
+        camera_transform: &Transform,
+        projection: &PerspectiveProjection,
+    ) -> Corners {
+        let half_height_far = projection.far * projection.slope();
+        let half_width_far = half_height_far * projection.aspect_ratio;
+
+        let far_up = camera_transform.up() * half_height_far;
+        let far_right = camera_transform.right() * half_width_far;
+
+        let center_on_far_plane =
+            camera_transform.translation + projection.far * camera_transform.forward();
+
+        Corners {
+            top_left: center_on_far_plane + far_up - far_right,
+            top_right: center_on_far_plane + far_up + far_right,
+            bottom_left: center_on_far_plane - far_up - far_right,
+            bottom_right: center_on_far_plane - far_up + far_right,
         }
     }
 
