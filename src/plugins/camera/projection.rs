@@ -13,6 +13,10 @@ impl PerspectiveProjection {
     pub fn compute_matrix(&self) -> Mat4 {
         Mat4::perspective_rh(self.fov_y, self.aspect_ratio, self.near, self.far)
     }
+
+    pub fn slope(&self) -> f32 {
+        (self.fov_y * 0.5).tan()
+    }
 }
 
 impl Default for PerspectiveProjection {
