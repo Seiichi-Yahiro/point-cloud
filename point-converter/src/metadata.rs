@@ -51,6 +51,10 @@ impl Metadata {
         (pos / cell_size).floor().as_ivec3()
     }
 
+    pub fn cell_pos(&self, cell_index: IVec3, cell_size: f32) -> Vec3 {
+        cell_index.as_vec3() * cell_size + cell_size / 2.0
+    }
+
     pub fn cell_spacing(&self, cell_size: f32) -> f32 {
         (cell_size / self.sub_grid_dimension as f32) / 2.0
     }
