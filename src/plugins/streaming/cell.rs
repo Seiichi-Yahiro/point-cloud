@@ -11,6 +11,7 @@ use flume::{Receiver, Sender, TryRecvError};
 use glam::{IVec3, Vec3};
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use thousands::Separable;
 
 use point_converter::cell::CellId;
 
@@ -102,6 +103,7 @@ pub struct CellData {
     pub id: CellId,
     pub pos: Vec3,
     pub size: f32,
+    pub number_of_points: u32,
 }
 
 #[derive(Default, Resource)]
@@ -241,6 +243,7 @@ fn receive_cell(
                             id,
                             pos: header.pos,
                             size: header.size,
+                            number_of_points: header.number_of_points,
                         };
 
                         let aabb = Aabb::new(
@@ -432,5 +435,11 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
             "Cells to load: {}",
             loading_cells.should_load.len()
         ));
+    }
+
+    {
+        let mut query = world.query::<&CellData>();
+        let sum = query.iter(world).map(|it| it.number_of_points).sum::<u32>();
+        ui.label(format!("Loaded points: {}", sum.separate_with_commas()));
     }
 }
