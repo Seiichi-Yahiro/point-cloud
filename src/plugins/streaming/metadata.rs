@@ -2,6 +2,7 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use flume::{Receiver, Sender, TryRecvError};
 use glam::Vec3;
+use thousands::Separable;
 
 use point_converter::metadata::Metadata;
 
@@ -202,7 +203,10 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         .metadata;
 
     ui.label(format!("Cloud name: {}", metadata.name));
-    ui.label(format!("Points: {}", metadata.number_of_points));
+    ui.label(format!(
+        "Total points: {}",
+        metadata.number_of_points.separate_with_commas()
+    ));
     ui.label(format!("Hierarchies: {}", metadata.hierarchies));
 
     ui.collapsing("Extends", |ui| {
