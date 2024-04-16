@@ -1,14 +1,16 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
+use std::hash::BuildHasherDefault;
 use std::ops::{Deref, DerefMut};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use caches::{Cache, DefaultEvictCallback, RawLRU};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
 use glam::{IVec3, Vec3};
 use itertools::Itertools;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use point_converter::cell::CellId;
 
@@ -48,7 +50,9 @@ impl Plugin for CellPlugin {
         shader::setup(&mut app.world);
 
         app.insert_state(StreamState::Enabled)
-            .insert_resource(Cells::default())
+            .insert_resource(LoadedCells::default())
+            .insert_resource(MissingCells::default())
+            .insert_resource(LoadingCells::default())
             .add_systems(PostStartup, add_hierarchy_spheres)
             .add_systems(
                 Update,
@@ -100,27 +104,31 @@ pub struct CellData {
     pub size: f32,
 }
 
-#[derive(Debug)]
-enum LoadedCellStatus {
-    Missing,
-    Loaded(Entity),
+#[derive(Default, Resource)]
+struct LoadedCells(FxHashMap<CellId, Entity>);
+
+#[derive(Resource)]
+struct MissingCells(RawLRU<CellId, (), DefaultEvictCallback, BuildHasherDefault<FxHasher>>);
+
+impl Default for MissingCells {
+    fn default() -> Self {
+        Self(RawLRU::with_hasher(10000, BuildHasherDefault::default()).unwrap())
+    }
 }
 
 #[derive(Resource)]
-struct Cells {
-    loaded: FxHashMap<CellId, LoadedCellStatus>,
+struct LoadingCells {
     should_load: BTreeSet<CellToLoad>,
     loading: FxHashSet<CellId>,
 }
 
-impl Cells {
+impl LoadingCells {
     const MAX_LOADING_SIZE: usize = 10;
 }
 
-impl Default for Cells {
+impl Default for LoadingCells {
     fn default() -> Self {
         Self {
-            loaded: FxHashMap::default(),
             should_load: BTreeSet::new(),
             loading: FxHashSet::with_capacity(Self::MAX_LOADING_SIZE),
         }
@@ -180,11 +188,14 @@ impl DerefMut for HierarchySpheres {
 fn cleanup_cells(
     mut commands: Commands,
     cell_query: Query<Entity, With<CellData>>,
-    mut cells: ResMut<Cells>,
+    mut loaded_cells: ResMut<LoadedCells>,
+    mut missing_cells: ResMut<MissingCells>,
+    mut loading_cells: ResMut<LoadingCells>,
 ) {
-    cells.should_load.clear();
-    cells.loading.clear();
-    cells.loaded.clear();
+    loading_cells.should_load.clear();
+    loading_cells.loading.clear();
+    loaded_cells.0.clear();
+    *missing_cells = MissingCells::default();
 
     for entity in cell_query.iter() {
         commands.entity(entity).despawn();
@@ -196,12 +207,14 @@ fn receive_cell(
     channels: ChannelsRes,
     device: Res<Device>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
-    mut cells: ResMut<Cells>,
+    mut loaded_cells: ResMut<LoadedCells>,
+    mut missing_cells: ResMut<MissingCells>,
+    mut loading_cells: ResMut<LoadingCells>,
 ) {
-    for _ in 0..Cells::MAX_LOADING_SIZE {
+    for _ in 0..LoadingCells::MAX_LOADING_SIZE {
         match channels.loaded_receiver.try_recv() {
             Ok(LoadedCellMsg { id, cell }) => {
-                if !cells.loading.remove(&id) {
+                if !loading_cells.loading.remove(&id) {
                     log::debug!("Cell {:?} was loaded but no longer needed", id);
                     continue;
                 }
@@ -245,11 +258,11 @@ fn receive_cell(
                             ))
                             .id();
 
-                        cells.loaded.insert(id, LoadedCellStatus::Loaded(entity));
+                        loaded_cells.0.insert(id, entity);
                     }
                     Ok(None) => {
                         log::debug!("Cell is missing: {:?}", id);
-                        cells.loaded.insert(id, LoadedCellStatus::Missing);
+                        missing_cells.0.put(id, ());
                     }
                     Err(err) => {
                         // TODO do something with the failed cell
@@ -299,12 +312,14 @@ fn update_cells(
     mut commands: Commands,
     camera_query: Query<(&HierarchySpheres, &Transform), (With<Camera>, Changed<HierarchySpheres>)>,
     active_metadata: ActiveMetadataRes,
-    mut cells: ResMut<Cells>,
+    mut loaded_cells: ResMut<LoadedCells>,
+    mut missing_cells: ResMut<MissingCells>,
+    mut loading_cells: ResMut<LoadingCells>,
 ) {
     let metadata = &active_metadata.metadata;
 
     for (hierarchy_spheres, transform) in camera_query.iter() {
-        let mut new_loaded = FxHashMap::with_capacity(cells.loaded.capacity());
+        let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
         let mut new_should_load = BTreeSet::new();
 
         for (hierarchy, sphere) in hierarchy_spheres.iter().enumerate() {
@@ -325,6 +340,7 @@ fn update_cells(
                 .cartesian_product(min_cell_index.z..=max_cell_index.z)
                 .map(|((x, y), z)| IVec3::new(x, y, z))
                 .map(move |index| CellId { index, hierarchy })
+                .filter(|cell_id| missing_cells.0.get(cell_id).is_none())
                 .map(|cell_id| {
                     let cell_pos = metadata.cell_pos(cell_id.index, cell_size);
                     let distance_to_camera =
@@ -337,40 +353,35 @@ fn update_cells(
 
             // copy or insert cells that need to be loaded
             for cell_to_load in ids {
-                if let Some(status) = cells.loaded.remove(&cell_to_load.id) {
+                if let Some(status) = loaded_cells.0.remove(&cell_to_load.id) {
                     new_loaded.insert(cell_to_load.id, status);
-                } else if cells.should_load.remove(&cell_to_load)
-                    || !cells.loading.contains(&cell_to_load.id)
+                } else if loading_cells.should_load.remove(&cell_to_load)
+                    || !loading_cells.loading.contains(&cell_to_load.id)
                 {
                     new_should_load.insert(cell_to_load);
                 }
             }
         }
 
-        for status in cells.loaded.values() {
-            match status {
-                LoadedCellStatus::Missing => {}
-                LoadedCellStatus::Loaded(entity) => {
-                    commands.entity(*entity).despawn();
-                }
-            }
+        for (_, entity) in loaded_cells.0.drain() {
+            commands.entity(entity).despawn();
         }
 
-        cells.loaded = new_loaded;
-        cells.should_load = new_should_load;
+        loaded_cells.0 = new_loaded;
+        loading_cells.should_load = new_should_load;
     }
 }
 
 fn enqueue_cells_to_load(
-    mut cells: ResMut<Cells>,
+    mut loading_cells: ResMut<LoadingCells>,
     active_metadata: ActiveMetadataRes,
     channels: ChannelsRes,
 ) {
-    let free_load_slots = Cells::MAX_LOADING_SIZE - cells.loading.len();
+    let free_load_slots = LoadingCells::MAX_LOADING_SIZE - loading_cells.loading.len();
 
     for _ in 0..free_load_slots {
-        if let Some(cell_to_load) = cells.should_load.pop_first() {
-            cells.loading.insert(cell_to_load.id);
+        if let Some(cell_to_load) = loading_cells.should_load.pop_first() {
+            loading_cells.loading.insert(cell_to_load.id);
 
             channels
                 .load_sender
@@ -411,9 +422,15 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     }
 
     {
-        let cells = world.get_resource::<Cells>().unwrap();
+        let loaded_cells = world.get_resource::<LoadedCells>().unwrap();
+        let missing_cells = world.get_resource::<MissingCells>().unwrap();
+        let loading_cells = world.get_resource::<LoadingCells>().unwrap();
 
-        ui.label(format!("Loaded cells: {}", cells.loaded.len()));
-        ui.label(format!("Cells to load: {}", cells.should_load.len()));
+        ui.label(format!("Loaded cells: {}", loaded_cells.0.len()));
+        ui.label(format!("Missing cells: {}", missing_cells.0.len()));
+        ui.label(format!(
+            "Cells to load: {}",
+            loading_cells.should_load.len()
+        ));
     }
 }
