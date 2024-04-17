@@ -3,7 +3,7 @@ use std::hash::Hash;
 use bevy_app::prelude::*;
 use bevy_ecs::event::{EventReader, EventWriter};
 use bevy_ecs::prelude::*;
-use egui::ahash::HashSet;
+use rustc_hash::FxHashSet;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -32,7 +32,7 @@ pub struct KeyEvent {
 
 #[derive(Resource)]
 pub struct PressedButton<T: Hash + Eq> {
-    pressed: HashSet<T>,
+    pressed: FxHashSet<T>,
 }
 
 impl<T: Hash + Eq> PressedButton<T> {
@@ -47,7 +47,7 @@ pub type PressedMouseButtons = PressedButton<MouseButton>;
 impl Default for PressedKeys {
     fn default() -> Self {
         Self {
-            pressed: HashSet::default(),
+            pressed: FxHashSet::default(),
         }
     }
 }
@@ -55,7 +55,7 @@ impl Default for PressedKeys {
 impl Default for PressedMouseButtons {
     fn default() -> Self {
         Self {
-            pressed: HashSet::default(),
+            pressed: FxHashSet::default(),
         }
     }
 }
