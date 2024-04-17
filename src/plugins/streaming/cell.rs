@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bytesize::ByteSize;
 use caches::{Cache, DefaultEvictCallback, RawLRU};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
@@ -18,6 +19,7 @@ use point_converter::cell::CellId;
 use crate::plugins::camera::frustum::{Aabb, Corners, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
+use crate::plugins::render::point::Point;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::loader::{spawn_cell_loader, LoadCellMsg, LoadedCellMsg};
 use crate::plugins::streaming::cell::shader::{CellBindGroupData, CellBindGroupLayout};
@@ -493,5 +495,9 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         let mut query = world.query::<&CellData>();
         let sum = query.iter(world).map(|it| it.number_of_points).sum::<u32>();
         ui.label(format!("Loaded points: {}", sum.separate_with_commas()));
+        ui.label(format!(
+            "Loaded size: {}",
+            ByteSize(sum as u64 * std::mem::size_of::<Point>() as u64)
+        ));
     }
 }
