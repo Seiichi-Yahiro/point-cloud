@@ -66,8 +66,18 @@ impl Plugin for CellPlugin {
                     .run_if(in_state(MetadataState::Loaded))
                     .run_if(in_state(StreamState::Enabled)),
             )
+            .add_systems(OnEnter(MetadataState::Loaded), set_view_distance)
             .add_systems(OnExit(MetadataState::Loaded), cleanup_cells)
             .add_systems(PostUpdate, shader::update_loaded_cells_buffer);
+    }
+}
+
+fn set_view_distance(
+    active_metadata: ActiveMetadataRes,
+    mut camera_query: Query<&mut PerspectiveProjection, With<Camera>>,
+) {
+    for mut projection in camera_query.iter_mut() {
+        projection.far = active_metadata.metadata.max_cell_size;
     }
 }
 
