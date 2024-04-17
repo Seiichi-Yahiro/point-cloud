@@ -2,11 +2,11 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use glam::Vec3;
 
-use crate::plugins::camera::{Camera, ViewBindGroupLayout};
+use crate::plugins::camera::{Camera, ViewBindGroupLayout, Visibility};
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::render::{GlobalDepthTexture, GlobalRenderResources, RenderPassSet};
 use crate::plugins::streaming::cell::shader::{
-    CellBindGroupData, CellBindGroupLayout, VisibleCellsBindGroupData,
+    CellBindGroupData, CellBindGroupLayout, LoadedCellsBindGroupData,
 };
 use crate::plugins::streaming::metadata::shader::MetadataBindGroupData;
 use crate::plugins::wgpu::{Device, SurfaceConfig};
@@ -53,7 +53,7 @@ fn setup(
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
-    visible_cells_bind_group_data: Res<VisibleCellsBindGroupData>,
+    visible_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
 ) {
     let shader = device.create_shader_module(wgpu::include_wgsl!("point.wgsl"));
 
@@ -117,9 +117,9 @@ fn draw(
     depth_texture: Res<GlobalDepthTexture>,
     local_render_resources: Res<RenderResources>,
     camera_query: Query<&Camera>,
-    vertex_buffers: Query<(&VertexBuffer<Point>, &CellBindGroupData)>,
+    vertex_buffers: Query<(&VertexBuffer<Point>, &CellBindGroupData, &Visibility)>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
-    visible_cells_bind_group_data: Res<VisibleCellsBindGroupData>,
+    visible_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
 ) {
     let global_render_resources = &mut *global_render_resources;
 
@@ -159,9 +159,11 @@ fn draw(
         render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
         render_pass.set_bind_group(3, &visible_cells_bind_group_data.group, &[]);
 
-        for (vertex_buffer, cell_bind_group_data) in
-            vertex_buffers.iter_many(camera.visible_entities.iter())
-        {
+        for (vertex_buffer, cell_bind_group_data, visibility) in vertex_buffers.iter() {
+            if !visibility.visible {
+                continue;
+            };
+
             render_pass.set_bind_group(2, &cell_bind_group_data.group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
             render_pass.draw(0..4, 0..vertex_buffer.len());

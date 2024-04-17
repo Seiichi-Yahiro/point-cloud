@@ -30,6 +30,15 @@ pub enum Source {
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
-    metadata::draw_ui(ui, world);
-    cell::draw_ui(ui, world);
+    egui::CollapsingHeader::new("Metadata")
+        .default_open(true)
+        .show(ui, |ui| {
+            metadata::draw_ui(ui, world);
+        });
+
+    egui::CollapsingHeader::new("Cells")
+        .default_open(true)
+        .show(ui, |ui| {
+            cell::draw_ui(ui, world);
+        });
 }

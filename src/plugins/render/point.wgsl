@@ -39,13 +39,13 @@ struct Cell {
 @group(2) @binding(0)
 var<uniform> cell: Cell;
 
-struct VisibleCells {
+struct LoadedCells {
     len: u32,
     cells: array<Cell>
 }
 
 @group(3) @binding(0)
-var<storage, read> visible_cells: VisibleCells;
+var<storage, read> loaded_cells: LoadedCells;
 
 struct InstanceInput {
     @location(0) position: vec3<f32>,
@@ -92,18 +92,18 @@ fn get_splat_radius(position: vec3<f32>) -> f32 {
     
     var i = 0u;
     
-    while i < visible_cells.len {
-        let visible_cell = visible_cells.cells[i];
+    while i < loaded_cells.len {
+        let cell = loaded_cells.cells[i];
         
-        if visible_cell.hierarchy == current_hierarchy {
-            if all(index == vec3(visible_cell.x, visible_cell.y, visible_cell.z)) {
+        if cell.hierarchy == current_hierarchy {
+            if all(index == vec3(cell.x, cell.y, cell.z)) {
                 spacing = hierarchy.spacing;
                 
                 current_hierarchy = current_hierarchy + 1;
                 hierarchy = metadata.hierarchies[current_hierarchy];
                 index = cell_index(position, hierarchy.cell_size);
             }
-        } else if visible_cell.hierarchy > current_hierarchy {
+        } else if cell.hierarchy > current_hierarchy {
             return spacing;
         }
         

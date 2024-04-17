@@ -6,7 +6,7 @@ use glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
-use crate::plugins::camera::frustum::{Aabb, Frustum};
+use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
 use crate::plugins::winit::WindowResized;
@@ -67,7 +67,6 @@ impl Plugin for CameraPlugin {
                 (
                     write_view_projection_uniform,
                     write_viewport_uniform.run_if(resource_changed::<SurfaceConfig>),
-                    frustum_cull.in_set(FrustumCull),
                 ),
             );
     }
@@ -78,9 +77,6 @@ pub struct CameraControlSet;
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
 pub struct UpdateFrustum;
-
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
-pub struct FrustumCull;
 
 #[derive(Resource)]
 pub struct ViewBindGroupLayout(wgpu::BindGroupLayout);
@@ -98,28 +94,16 @@ pub struct Camera {
     pub view_projection: wgpu::Buffer,
     pub viewport: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
-    pub visible_entities: Vec<Entity>,
-    frustum_cull_settings: FrustumCullSettings,
-}
-
-#[derive(Debug, Copy, Clone)]
-struct FrustumCullSettings {
-    pub enabled: bool,
-    pub paused: bool,
 }
 
 #[derive(Debug, Copy, Clone, Component)]
 pub struct Visibility {
     pub visible: bool,
-    computed_visibility: bool,
 }
 
 impl Visibility {
     pub fn new(visible: bool) -> Self {
-        Self {
-            visible,
-            computed_visibility: true,
-        }
+        Self { visible }
     }
 }
 
@@ -172,11 +156,6 @@ fn setup(
             view_projection: view_projection_uniform,
             viewport: viewport_uniform,
             bind_group: view_bind_group,
-            visible_entities: Vec::new(),
-            frustum_cull_settings: FrustumCullSettings {
-                enabled: true,
-                paused: false,
-            },
         },
         FlyCamController::new(),
         transform,
@@ -208,37 +187,6 @@ fn update_frustum(
 ) {
     for (mut frustum, transform, projection) in camera_query.iter_mut() {
         *frustum = Frustum::new(transform, projection);
-    }
-}
-
-fn frustum_cull(
-    mut camera_query: Query<(&mut Camera, &Frustum)>,
-    mut object_query: Query<(Entity, &Aabb, &mut Visibility)>,
-) {
-    for (mut camera, frustum) in camera_query.iter_mut() {
-        if camera.frustum_cull_settings.paused {
-            continue;
-        }
-
-        camera.visible_entities.clear();
-
-        if camera.frustum_cull_settings.enabled {
-            for (entity, aabb, mut visibility) in object_query.iter_mut() {
-                visibility.computed_visibility = !frustum.cull_aabb(*aabb);
-
-                if visibility.visible && visibility.computed_visibility {
-                    camera.visible_entities.push(entity);
-                }
-            }
-        } else {
-            for (entity, _aabb, mut visibility) in object_query.iter_mut() {
-                visibility.computed_visibility = true;
-
-                if visibility.visible {
-                    camera.visible_entities.push(entity);
-                }
-            }
-        }
     }
 }
 
@@ -277,32 +225,12 @@ fn write_viewport_uniform(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
-    let mut query = world.query::<(&mut Camera, &Transform)>();
-    for (mut camera, transform) in query.iter_mut(world) {
+    let mut query = world.query_filtered::<&Transform, With<Camera>>();
+    for transform in query.iter_mut(world) {
         ui.collapsing("Position", |ui| {
             ui.label(format!("x: {}", transform.translation.x));
             ui.label(format!("y: {}", transform.translation.y));
             ui.label(format!("z: {}", transform.translation.z));
-        });
-
-        ui.collapsing("Frustum culling", |ui| {
-            let mut enabled = camera.frustum_cull_settings.enabled;
-            if ui.checkbox(&mut enabled, "Enabled").changed() {
-                camera.frustum_cull_settings.enabled = enabled;
-
-                if !enabled {
-                    camera.frustum_cull_settings.paused = false;
-                }
-            }
-
-            let mut paused = camera.frustum_cull_settings.paused;
-            let paused_check_box = egui::Checkbox::new(&mut paused, "Paused");
-
-            if ui.add_enabled(enabled, paused_check_box).changed() {
-                camera.frustum_cull_settings.paused = paused;
-            }
-
-            ui.label(format!("Visible cells: {}", camera.visible_entities.len()));
         });
     }
 

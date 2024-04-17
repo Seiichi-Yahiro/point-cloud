@@ -8,16 +8,16 @@ use bevy_ecs::prelude::*;
 use caches::{Cache, DefaultEvictCallback, RawLRU};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
-use glam::{IVec3, Vec3};
+use glam::{IVec3, Vec3, Vec4};
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
 
 use point_converter::cell::CellId;
 
-use crate::plugins::camera::frustum::{Aabb, Frustum};
+use crate::plugins::camera::frustum::{Aabb, Corners, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
-use crate::plugins::camera::{Camera, FrustumCull, UpdateFrustum, Visibility};
+use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::loader::{spawn_cell_loader, LoadCellMsg, LoadedCellMsg};
 use crate::plugins::streaming::cell::shader::{CellBindGroupData, CellBindGroupLayout};
@@ -54,11 +54,11 @@ impl Plugin for CellPlugin {
             .insert_resource(LoadedCells::default())
             .insert_resource(MissingCells::default())
             .insert_resource(LoadingCells::default())
-            .add_systems(PostStartup, add_hierarchy_spheres)
+            .add_systems(PostStartup, add_streaming_frustums)
             .add_systems(
                 Update,
                 (
-                    (receive_cell, update_hierarchy_spheres.after(UpdateFrustum)),
+                    (receive_cell, update_streaming_frustums.after(UpdateFrustum)),
                     update_cells,
                     enqueue_cells_to_load,
                 )
@@ -67,10 +67,7 @@ impl Plugin for CellPlugin {
                     .run_if(in_state(StreamState::Enabled)),
             )
             .add_systems(OnExit(MetadataState::Loaded), cleanup_cells)
-            .add_systems(
-                PostUpdate,
-                shader::update_visible_cells_buffer.after(FrustumCull),
-            );
+            .add_systems(PostUpdate, shader::update_loaded_cells_buffer);
     }
 }
 
@@ -166,23 +163,24 @@ impl Ord for CellToLoad {
 }
 
 #[derive(Debug)]
-pub struct Sphere {
-    pub pos: Vec3,
-    pub radius: f32,
+pub struct StreamingFrustum {
+    pub far_corners: Corners,
+    pub far_plane: Vec4,
+    pub aabb: Aabb,
 }
 
 #[derive(Debug, Component)]
-pub struct HierarchySpheres(Vec<Sphere>);
+pub struct StreamingFrustums(Vec<StreamingFrustum>);
 
-impl Deref for HierarchySpheres {
-    type Target = Vec<Sphere>;
+impl Deref for StreamingFrustums {
+    type Target = Vec<StreamingFrustum>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for HierarchySpheres {
+impl DerefMut for StreamingFrustums {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -283,29 +281,67 @@ fn receive_cell(
     }
 }
 
-fn add_hierarchy_spheres(mut commands: Commands, camera_query: Query<Entity, With<Camera>>) {
+fn add_streaming_frustums(mut commands: Commands, camera_query: Query<Entity, With<Camera>>) {
     for entity in camera_query.iter() {
-        commands.entity(entity).insert(HierarchySpheres(Vec::new()));
+        commands
+            .entity(entity)
+            .insert(StreamingFrustums(Vec::new()));
     }
 }
 
-fn update_hierarchy_spheres(
+fn update_streaming_frustums(
     active_metadata: ActiveMetadataRes,
     mut camera_query: Query<
-        (&Transform, &PerspectiveProjection, &mut HierarchySpheres),
+        (
+            &Transform,
+            &PerspectiveProjection,
+            &Frustum,
+            &mut StreamingFrustums,
+        ),
         (With<Camera>, Changed<Frustum>),
     >,
 ) {
     let metadata = &active_metadata.metadata;
 
-    for (transform, projection, mut hierarchy_spheres) in camera_query.iter_mut() {
-        let forward = transform.forward();
+    for (transform, projection, frustum, mut streaming_frustums) in camera_query.iter_mut() {
+        let mut new_projection = projection.clone();
 
-        **hierarchy_spheres = (0..metadata.hierarchies)
+        let near_aabb = {
+            let mut near_corners_iter = frustum.near.iter().copied();
+            let first_corner = near_corners_iter.next().unwrap();
+            near_corners_iter.fold(Aabb::new(first_corner, first_corner), |mut acc, corner| {
+                acc.extend(corner);
+                acc
+            })
+        };
+
+        let forward = transform.forward();
+        let far_normal = frustum.planes.far.truncate();
+
+        **streaming_frustums = (0..metadata.hierarchies)
             .map(|hierarchy| {
-                let radius = metadata.cell_size(hierarchy);
-                let pos = transform.translation + forward * (projection.near + radius / 2.0);
-                Sphere { radius, pos }
+                let cell_size = metadata.cell_size(hierarchy);
+                let far_distance = cell_size * 2.0;
+                let center_on_far_plane = transform.translation + far_distance * forward;
+
+                new_projection.far = far_distance;
+                let far_corners = Frustum::far_corners(transform, &new_projection);
+
+                let mut aabb = far_corners
+                    .iter()
+                    .copied()
+                    .fold(near_aabb, |mut acc, corner| {
+                        acc.extend(corner);
+                        acc
+                    });
+
+                aabb.clamp(metadata.bounding_box.min, metadata.bounding_box.max);
+
+                StreamingFrustum {
+                    far_corners,
+                    far_plane: far_normal.extend(center_on_far_plane.dot(far_normal)),
+                    aabb,
+                }
             })
             .collect();
     }
@@ -313,7 +349,10 @@ fn update_hierarchy_spheres(
 
 fn update_cells(
     mut commands: Commands,
-    camera_query: Query<(&HierarchySpheres, &Transform), (With<Camera>, Changed<HierarchySpheres>)>,
+    camera_query: Query<
+        (&StreamingFrustums, &Transform, &Frustum),
+        (With<Camera>, Changed<StreamingFrustums>),
+    >,
     active_metadata: ActiveMetadataRes,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
@@ -321,22 +360,20 @@ fn update_cells(
 ) {
     let metadata = &active_metadata.metadata;
 
-    for (hierarchy_spheres, transform) in camera_query.iter() {
+    for (streaming_frustums, transform, frustum) in camera_query.iter() {
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
         let mut new_should_load = BTreeSet::new();
+        let mut frustum_planes = frustum.planes.clone();
 
-        for (hierarchy, sphere) in hierarchy_spheres.iter().enumerate() {
+        for (hierarchy, streaming_frustum) in streaming_frustums.iter().enumerate() {
             let hierarchy = hierarchy as u32;
 
             let cell_size = metadata.cell_size(hierarchy);
-            let min_cell_index = metadata.cell_index(
-                (sphere.pos - sphere.radius).max(metadata.bounding_box.min),
-                cell_size,
-            );
-            let max_cell_index = metadata.cell_index(
-                (sphere.pos + sphere.radius).min(metadata.bounding_box.max),
-                cell_size,
-            );
+            let half_cell_size = cell_size / 2.0;
+            let min_cell_index = metadata.cell_index(streaming_frustum.aabb.min, cell_size);
+            let max_cell_index = metadata.cell_index(streaming_frustum.aabb.max, cell_size);
+
+            frustum_planes.far = streaming_frustum.far_plane;
 
             let ids = (min_cell_index.x..=max_cell_index.x)
                 .cartesian_product(min_cell_index.y..=max_cell_index.y)
@@ -344,6 +381,11 @@ fn update_cells(
                 .map(|((x, y), z)| IVec3::new(x, y, z))
                 .map(move |index| CellId { index, hierarchy })
                 .filter(|cell_id| missing_cells.0.get(cell_id).is_none())
+                .filter(|cell_id| {
+                    let cell_pos = metadata.cell_pos(cell_id.index, cell_size);
+                    let cell_aabb = Aabb::new(cell_pos - half_cell_size, cell_pos + half_cell_size);
+                    !frustum_planes.cull_aabb(cell_aabb)
+                })
                 .map(|cell_id| {
                     let cell_pos = metadata.cell_pos(cell_id.index, cell_size);
                     let distance_to_camera =

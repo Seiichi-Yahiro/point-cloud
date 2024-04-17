@@ -62,6 +62,39 @@ impl Planes {
         ]
         .into_iter()
     }
+
+    /// Calculates if the provided aabb should be culled.
+    pub fn cull_aabb(&self, aabb: Aabb) -> bool {
+        for plane in self.iter() {
+            let corner_x = if plane.x >= 0.0 {
+                aabb.max.x
+            } else {
+                aabb.min.x
+            };
+
+            let corner_y = if plane.y >= 0.0 {
+                aabb.max.y
+            } else {
+                aabb.min.y
+            };
+
+            let corner_z = if plane.z >= 0.0 {
+                aabb.max.z
+            } else {
+                aabb.min.z
+            };
+
+            let nearest_corner = Vec4::new(corner_x, corner_y, corner_z, -1.0);
+
+            // calculate signed distance
+            // negative means outside (behind the plane)
+            if plane.dot(nearest_corner) <= 0.0 {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 impl<'a> IntoIterator for &'a Planes {
@@ -171,38 +204,11 @@ impl Frustum {
 
     /// Calculates if the provided aabb should be culled.
     pub fn cull_aabb(&self, aabb: Aabb) -> bool {
-        for plane in self.planes.iter() {
-            let corner_x = if plane.x >= 0.0 {
-                aabb.max.x
-            } else {
-                aabb.min.x
-            };
-
-            let corner_y = if plane.y >= 0.0 {
-                aabb.max.y
-            } else {
-                aabb.min.y
-            };
-
-            let corner_z = if plane.z >= 0.0 {
-                aabb.max.z
-            } else {
-                aabb.min.z
-            };
-
-            let nearest_corner = Vec4::new(corner_x, corner_y, corner_z, -1.0);
-
-            // calculate signed distance
-            // negative means outside (behind the plane)
-            if plane.dot(nearest_corner) <= 0.0 {
-                return true;
-            }
-        }
-
-        false
+        self.planes.cull_aabb(aabb)
     }
 }
 
+// TODO move to different module
 #[derive(Debug, Clone, Copy, Component)]
 pub struct Aabb {
     pub min: Vec3,
@@ -212,5 +218,23 @@ pub struct Aabb {
 impl Aabb {
     pub fn new(min: Vec3, max: Vec3) -> Self {
         Self { min, max }
+    }
+
+    pub fn center(&self) -> Vec3 {
+        (self.min + self.max) / 2.0
+    }
+
+    pub fn extends(&self) -> Vec3 {
+        (self.max - self.min) / 2.0
+    }
+
+    pub fn extend(&mut self, point: Vec3) {
+        self.min = self.min.min(point);
+        self.max = self.max.max(point);
+    }
+
+    pub fn clamp(&mut self, min: Vec3, max: Vec3) {
+        self.min = self.min.max(min);
+        self.max = self.max.min(max);
     }
 }

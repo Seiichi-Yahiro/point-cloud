@@ -8,7 +8,7 @@ use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::line::Line;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::cell::{CellData, HierarchySpheres};
+use crate::plugins::streaming::cell::{CellData, StreamingFrustums};
 use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 
@@ -20,14 +20,14 @@ impl Plugin for DebugPlugin {
             let toggle_frustum = app.world.register_system(toggle_frustum);
             let toggle_bounding_box = app.world.register_system(toggle_bounding_box);
             let toggle_grid = app.world.register_system(toggle_grid);
-            let toggle_streaming_hierarchy = app.world.register_system(toggle_streaming_hierarchy);
+            let toggle_streaming_frustums = app.world.register_system(toggle_streaming_frustums);
             let toggle_hierarchy = app.world.register_system(toggle_hierarchy);
 
             app.insert_resource(OneShotSystems {
                 toggle_frustum,
                 toggle_bounding_box,
                 toggle_grid,
-                toggle_streaming_hierarchy,
+                toggle_streaming_frustums,
                 toggle_hierarchy,
             });
         }
@@ -39,7 +39,7 @@ impl Plugin for DebugPlugin {
                 show: false,
                 hierarchies: Vec::new(),
             },
-            streaming_hierarchy_visibility: StreamingHierarchyVisibility {
+            streaming_frustums_visibility: StreamingFrustumsVisibility {
                 show: false,
                 hierarchies: Vec::new(),
             },
@@ -77,7 +77,7 @@ struct OneShotSystems {
     toggle_frustum: SystemId<bool>,
     toggle_bounding_box: SystemId<bool>,
     toggle_grid: SystemId<(bool, u32)>,
-    toggle_streaming_hierarchy: SystemId<(bool, u32)>,
+    toggle_streaming_frustums: SystemId<(bool, u32)>,
     toggle_hierarchy: SystemId<(bool, u32)>,
 }
 
@@ -86,7 +86,7 @@ struct State {
     show_frustum: bool,
     show_bounding_box: bool,
     grid: GridSettings,
-    streaming_hierarchy_visibility: StreamingHierarchyVisibility,
+    streaming_frustums_visibility: StreamingFrustumsVisibility,
     hierarchy_visibility: HierarchyVisibility,
 }
 
@@ -100,7 +100,7 @@ struct HierarchyVisibility {
     hierarchies: Vec<bool>,
 }
 
-struct StreamingHierarchyVisibility {
+struct StreamingFrustumsVisibility {
     show: bool,
     hierarchies: Vec<bool>,
 }
@@ -225,7 +225,7 @@ fn toggle_bounding_box(
 fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadataRes) {
     let hierarchies = active_metadata.metadata.hierarchies as usize;
     state.grid.hierarchies = vec![true; hierarchies];
-    state.streaming_hierarchy_visibility.hierarchies = vec![true; hierarchies];
+    state.streaming_frustums_visibility.hierarchies = vec![true; hierarchies];
     state.hierarchy_visibility.hierarchies = vec![true; hierarchies];
 }
 
@@ -300,25 +300,33 @@ fn toggle_grid(
 }
 
 #[derive(Component)]
-struct StreamingHierarchyLine(u32);
+struct StreamingFrustumLine(u32);
 
-fn toggle_streaming_hierarchy(
+fn toggle_streaming_frustums(
     In((show, hierarchy)): In<(bool, u32)>,
     mut commands: Commands,
     device: Res<Device>,
-    add_query: Query<&HierarchySpheres, With<Camera>>,
-    remove_query: Query<(Entity, &StreamingHierarchyLine)>,
+    add_query: Query<&StreamingFrustums, With<Camera>>,
+    remove_query: Query<(Entity, &StreamingFrustumLine)>,
 ) {
     if show {
-        for spheres in add_query.iter() {
-            let sphere = &spheres[hierarchy as usize];
-            let lines = line_box(
+        for streaming_frustums in add_query.iter() {
+            let streaming_frustum = &streaming_frustums[hierarchy as usize];
+            let far_corners = &streaming_frustum.far_corners;
+
+            let lines = line_strip(
                 [255, 0, if hierarchy % 2 == 0 { 180 } else { 90 }, 255],
-                sphere.pos,
-                Vec3::splat(sphere.radius),
+                &[
+                    far_corners.top_left,
+                    far_corners.top_right,
+                    far_corners.bottom_right,
+                    far_corners.bottom_left,
+                    far_corners.top_left,
+                ],
             );
+
             let buffer = VertexBuffer::new(&device, &lines);
-            commands.spawn((StreamingHierarchyLine(hierarchy), buffer));
+            commands.spawn((StreamingFrustumLine(hierarchy), buffer));
         }
     } else {
         for (entity, line) in remove_query.iter() {
@@ -386,7 +394,7 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         }
 
         draw_ui_grid(ui, world, &mut state);
-        draw_ui_streaming_hierarchy(ui, world, &mut state);
+        draw_ui_streaming_frustums(ui, world, &mut state);
         draw_ui_visible_hierarchies(ui, world, &mut state);
     });
 }
@@ -419,24 +427,24 @@ fn draw_ui_grid(ui: &mut egui::Ui, world: &mut World, state: &mut State) {
         });
 }
 
-fn draw_ui_streaming_hierarchy(ui: &mut egui::Ui, world: &mut World, state: &mut State) {
-    let id = ui.make_persistent_id("streaming_hierarchy_header");
+fn draw_ui_streaming_frustums(ui: &mut egui::Ui, world: &mut World, state: &mut State) {
+    let id = ui.make_persistent_id("streaming_frustums_header");
     egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
         .show_header(ui, |ui| {
             if ui
                 .checkbox(
-                    &mut state.streaming_hierarchy_visibility.show,
-                    "Streaming Hierarchies",
+                    &mut state.streaming_frustums_visibility.show,
+                    "Streaming Frustums",
                 )
                 .changed()
             {
-                let toggle_streaming_hierarchy = world
+                let toggle_streaming_frustums = world
                     .get_resource::<OneShotSystems>()
                     .unwrap()
-                    .toggle_streaming_hierarchy;
+                    .toggle_streaming_frustums;
 
                 for (hierarchy, show) in state
-                    .streaming_hierarchy_visibility
+                    .streaming_frustums_visibility
                     .hierarchies
                     .iter()
                     .enumerate()
@@ -444,8 +452,8 @@ fn draw_ui_streaming_hierarchy(ui: &mut egui::Ui, world: &mut World, state: &mut
                     if *show {
                         world
                             .run_system_with_input(
-                                toggle_streaming_hierarchy,
-                                (state.streaming_hierarchy_visibility.show, hierarchy as u32),
+                                toggle_streaming_frustums,
+                                (state.streaming_frustums_visibility.show, hierarchy as u32),
                             )
                             .unwrap();
                     }
@@ -454,22 +462,19 @@ fn draw_ui_streaming_hierarchy(ui: &mut egui::Ui, world: &mut World, state: &mut
         })
         .body(|ui| {
             for (hierarchy, show) in state
-                .streaming_hierarchy_visibility
+                .streaming_frustums_visibility
                 .hierarchies
                 .iter_mut()
                 .enumerate()
             {
                 if ui.checkbox(show, hierarchy.to_string()).changed() {
-                    let toggle_streaming_hierarchy = world
+                    let toggle_streaming_frustums = world
                         .get_resource::<OneShotSystems>()
                         .unwrap()
-                        .toggle_streaming_hierarchy;
+                        .toggle_streaming_frustums;
 
                     world
-                        .run_system_with_input(
-                            toggle_streaming_hierarchy,
-                            (*show, hierarchy as u32),
-                        )
+                        .run_system_with_input(toggle_streaming_frustums, (*show, hierarchy as u32))
                         .unwrap();
                 }
             }

@@ -1,11 +1,12 @@
-use crate::plugins::camera::Camera;
-use crate::plugins::streaming::cell::CellData;
-use crate::plugins::wgpu::{Device, Queue};
 use bevy_ecs::prelude::*;
 use glam::IVec3;
 use itertools::Itertools;
-use point_converter::cell::CellId;
 use wgpu::util::DeviceExt;
+
+use point_converter::cell::CellId;
+
+use crate::plugins::streaming::cell::CellData;
+use crate::plugins::wgpu::{Device, Queue};
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -74,14 +75,14 @@ impl CellBindGroupData {
 }
 
 #[derive(Resource)]
-pub struct VisibleCellsBindGroupData {
+pub struct LoadedCellsBindGroupData {
     pub layout: wgpu::BindGroupLayout,
     pub group: wgpu::BindGroup,
     buffer: wgpu::Buffer,
     buffer_capacity: usize,
 }
 
-impl VisibleCellsBindGroupData {
+impl LoadedCellsBindGroupData {
     fn new(device: &wgpu::Device) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("visible-cells-bind-group-layout"),
@@ -141,47 +142,44 @@ impl VisibleCellsBindGroupData {
     }
 }
 
-pub(super) fn update_visible_cells_buffer(
+pub(super) fn update_loaded_cells_buffer(
     queue: Res<Queue>,
     device: Res<Device>,
-    mut visible_cells_bind_group_data: ResMut<VisibleCellsBindGroupData>,
-    camera_query: Query<&Camera>,
+    mut loaded_cells_bind_group_data: ResMut<LoadedCellsBindGroupData>,
     cell_query: Query<&CellData>,
 ) {
-    if let Ok(camera) = camera_query.get_single() {
-        let mut visible_cells = cell_query
-            .iter_many(camera.visible_entities.iter())
-            .map(|cell_data| Cell {
-                hierarchy: cell_data.id.hierarchy,
-                index: cell_data.id.index,
-            })
-            .collect_vec();
+    let mut loaded_cells = cell_query
+        .iter()
+        .map(|cell_data| Cell {
+            hierarchy: cell_data.id.hierarchy,
+            index: cell_data.id.index,
+        })
+        .collect_vec();
 
-        visible_cells.sort_unstable_by_key(|cell| cell.hierarchy);
+    loaded_cells.sort_unstable_by_key(|cell| cell.hierarchy);
 
-        if visible_cells.len() > visible_cells_bind_group_data.buffer_capacity {
-            visible_cells_bind_group_data.set_capacity(visible_cells.len() + 50, &device);
-        }
-
-        queue.write_buffer(
-            &visible_cells_bind_group_data.buffer,
-            0,
-            bytemuck::bytes_of(&(visible_cells.len() as u32)),
-        );
-
-        queue.write_buffer(
-            &visible_cells_bind_group_data.buffer,
-            std::mem::size_of::<u32>() as wgpu::BufferAddress,
-            bytemuck::cast_slice(&visible_cells),
-        );
+    if loaded_cells.len() > loaded_cells_bind_group_data.buffer_capacity {
+        loaded_cells_bind_group_data.set_capacity(loaded_cells.len() + 50, &device);
     }
+
+    queue.write_buffer(
+        &loaded_cells_bind_group_data.buffer,
+        0,
+        bytemuck::bytes_of(&(loaded_cells.len() as u32)),
+    );
+
+    queue.write_buffer(
+        &loaded_cells_bind_group_data.buffer,
+        std::mem::size_of::<u32>() as wgpu::BufferAddress,
+        bytemuck::cast_slice(&loaded_cells),
+    );
 }
 
 pub(super) fn setup(world: &mut World) {
     let device = world.get_resource::<Device>().unwrap();
 
     let cell_bind_group_layout = CellBindGroupLayout::new(device);
-    let visible_cells_bind_group_data = VisibleCellsBindGroupData::new(device);
+    let visible_cells_bind_group_data = LoadedCellsBindGroupData::new(device);
 
     world.insert_resource(cell_bind_group_layout);
     world.insert_resource(visible_cells_bind_group_data);
