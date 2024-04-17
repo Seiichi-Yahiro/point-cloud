@@ -25,6 +25,8 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
 }
 
+const LINE_THICKNESS = 50.0;
+
 @vertex
 fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
@@ -47,8 +49,7 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     let clip: vec4<f32> = alternate_start_end_4(vertex.index, start_clip, end_clip);
     let screen: vec2<f32> = alternate_start_end_2(vertex.index, start_screen, end_screen);
 
-    let thickness = 4.0;
-    var half_line_width = thickness / (clip.w * 2.0);
+    var half_line_width = LINE_THICKNESS / (clip.w * 2.0);
     if (half_line_width < 0.5) {
         half_line_width = 0.5;
     }
