@@ -53,6 +53,7 @@ impl Plugin for CellPlugin {
         shader::setup(&mut app.world);
 
         app.insert_state(StreamState::Enabled)
+            .insert_resource(StreamingFrustumsScale::default())
             .insert_resource(LoadedCells::default())
             .insert_resource(MissingCells::default())
             .insert_resource(LoadingCells::default())
@@ -171,6 +172,20 @@ impl Ord for CellToLoad {
             .hierarchy
             .cmp(&other.id.hierarchy)
             .then(self.priority.cmp(&other.priority))
+    }
+}
+
+#[derive(Resource)]
+struct StreamingFrustumsScale(f32);
+
+impl StreamingFrustumsScale {
+    const MIN: f32 = 1.0;
+    const MAX: f32 = 5.0;
+}
+
+impl Default for StreamingFrustumsScale {
+    fn default() -> Self {
+        Self(2.0)
     }
 }
 
@@ -307,15 +322,20 @@ fn update_streaming_frustums(
         (
             &Transform,
             &PerspectiveProjection,
-            &Frustum,
+            Ref<Frustum>,
             &mut StreamingFrustums,
         ),
-        (With<Camera>, Changed<Frustum>),
+        With<Camera>,
     >,
+    streaming_frustums_scale: Res<StreamingFrustumsScale>,
 ) {
     let metadata = &active_metadata.metadata;
 
     for (transform, projection, frustum, mut streaming_frustums) in camera_query.iter_mut() {
+        if !(frustum.is_changed() || streaming_frustums_scale.is_changed()) {
+            continue;
+        }
+
         let mut new_projection = projection.clone();
 
         let near_aabb = {
@@ -333,7 +353,7 @@ fn update_streaming_frustums(
         **streaming_frustums = (0..metadata.hierarchies)
             .map(|hierarchy| {
                 let cell_size = metadata.cell_size(hierarchy);
-                let far_distance = (cell_size * 2.0).min(projection.far);
+                let far_distance = (cell_size * streaming_frustums_scale.0).min(projection.far);
                 let center_on_far_plane = transform.translation + far_distance * forward;
 
                 new_projection.far = far_distance;
@@ -475,6 +495,24 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
             };
 
             next_stream_state.set(next_state);
+        }
+    }
+
+    {
+        ui.label("Load distance scale:");
+
+        let mut streaming_frustums_scale =
+            world.get_resource_mut::<StreamingFrustumsScale>().unwrap();
+        let mut scale = streaming_frustums_scale.0;
+
+        let slider = egui::Slider::new(
+            &mut scale,
+            StreamingFrustumsScale::MIN..=StreamingFrustumsScale::MAX,
+        )
+        .step_by(0.1);
+
+        if ui.add(slider).changed() {
+            streaming_frustums_scale.0 = scale;
         }
     }
 
