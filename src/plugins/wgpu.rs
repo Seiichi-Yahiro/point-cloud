@@ -1,11 +1,11 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::{SystemParam, SystemState};
+use bevy_window::{PrimaryWindow, RawHandleWrapper, WindowResized};
+use bevy_winit::WinitWindows;
 use wgpu::TextureFormat;
-
-use crate::plugins::winit::{Window, WindowResized};
 
 #[derive(Resource)]
 pub struct Device(wgpu::Device);
@@ -60,10 +60,21 @@ impl DerefMut for SurfaceConfig {
 pub struct WGPUPlugin;
 
 impl WGPUPlugin {
-    pub async fn build(window: Arc<winit::window::Window>, app: &mut App) {
+    pub async fn build(app: &mut App) {
+        let mut params: SystemState<(
+            NonSend<WinitWindows>,
+            Query<(Entity, &RawHandleWrapper), With<PrimaryWindow>>,
+        )> = SystemState::new(&mut app.world);
+
+        let (winit_windows, query) = params.get(&app.world);
+        let (window_entity, window_wrapper) = query.get_single().unwrap();
+        let window = winit_windows.get_window(window_entity).unwrap();
+
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window).unwrap();
+        let surface = instance
+            .create_surface(unsafe { window_wrapper.get_handle() })
+            .unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -111,22 +122,32 @@ impl WGPUPlugin {
         app.insert_resource(Surface(surface));
         app.insert_resource(SurfaceConfig(config));
 
-        app.add_systems(PreUpdate, resize_window.run_if(on_event::<WindowResized>()));
+        app.add_systems(First, resize_window.run_if(on_event::<WindowResized>()));
+    }
+}
+
+#[derive(SystemParam)]
+pub struct WinitWindow<'w, 's> {
+    primary_window_query: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    winit_windows: NonSend<'w, WinitWindows>,
+}
+
+impl<'w, 's> WinitWindow<'w, 's> {
+    pub fn get(&self) -> &winit::window::Window {
+        let window_entity = self.primary_window_query.get_single().unwrap();
+        self.winit_windows.get_window(window_entity).unwrap()
     }
 }
 
 fn resize_window(
-    mut window_resized_events: EventReader<WindowResized>,
     surface: Res<Surface>,
     mut config: ResMut<SurfaceConfig>,
     device: Res<Device>,
-    window: Res<Window>,
+    winit_window: WinitWindow,
 ) {
-    if let Some(resized) = window_resized_events.read().last() {
-        let size = resized.physical_size;
-        config.width = size.width.max(1);
-        config.height = size.height.max(1);
-        surface.configure(&device, &config);
-        window.request_redraw();
-    }
+    let size = winit_window.get().inner_size();
+
+    config.width = size.width.max(1);
+    config.height = size.height.max(1);
+    surface.configure(&device, &config);
 }

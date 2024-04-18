@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_window::WindowResized;
 use glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
@@ -9,7 +10,6 @@ use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
-use crate::plugins::winit::WindowResized;
 use crate::transform::Transform;
 
 pub mod fly_cam;
@@ -165,14 +165,12 @@ fn setup(
 }
 
 fn update_aspect_ratio(
-    mut window_resized: EventReader<WindowResized>,
     mut query: Query<&mut PerspectiveProjection>,
+    surface_config: Res<SurfaceConfig>,
 ) {
-    if let Some(resized) = window_resized.read().last() {
-        for mut projection in query.iter_mut() {
-            projection.aspect_ratio =
-                resized.physical_size.width as f32 / resized.physical_size.height as f32;
-        }
+    let aspect_ratio = surface_config.width as f32 / surface_config.height as f32;
+    for mut projection in query.iter_mut() {
+        projection.aspect_ratio = aspect_ratio;
     }
 }
 

@@ -5,12 +5,12 @@ use bevy_app::prelude::*;
 use bevy_app::AppExit;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemState;
+use bevy_window::WindowResized;
 use wgpu::SurfaceError;
 
 use crate::plugins::render::point::PointRenderPlugin;
 use crate::plugins::render::ui::UiPlugin;
 use crate::plugins::wgpu::{Device, Queue, Surface, SurfaceConfig};
-use crate::plugins::winit::{Window, WindowResized};
 use crate::texture::Texture;
 
 pub mod line;
@@ -81,19 +81,14 @@ fn setup(mut commands: Commands, device: Res<Device>, config: Res<SurfaceConfig>
 }
 
 fn update_depth_texture(
-    mut window_resized: EventReader<WindowResized>,
+    surface_config: Res<SurfaceConfig>,
     mut depth_texture: ResMut<GlobalDepthTexture>,
     device: Res<Device>,
 ) {
-    if let Some(resized) = window_resized.read().last() {
-        let texture = Texture::create_depth_texture(
-            &device,
-            resized.physical_size.width,
-            resized.physical_size.height,
-        );
+    let texture =
+        Texture::create_depth_texture(&device, surface_config.width, surface_config.height);
 
-        *depth_texture = GlobalDepthTexture::new(texture);
-    }
+    *depth_texture = GlobalDepthTexture::new(texture);
 }
 
 #[derive(Resource)]
@@ -103,8 +98,8 @@ struct GlobalRenderResources {
     encoder: wgpu::CommandEncoder,
 }
 
-fn prepare(world: &mut World, params: &mut SystemState<(Res<Surface>, Res<Device>, Res<Window>)>) {
-    let (surface, device, window) = params.get(world);
+fn prepare(world: &mut World, params: &mut SystemState<(Res<Surface>, Res<Device>)>) {
+    let (surface, device) = params.get(world);
 
     let frame = match surface.get_current_texture() {
         Ok(frame) => frame,
@@ -117,11 +112,8 @@ fn prepare(world: &mut World, params: &mut SystemState<(Res<Surface>, Res<Device
                     // happens when window gets minimized
                 }
                 SurfaceError::Lost => {
-                    world
-                        .send_event(WindowResized {
-                            physical_size: window.inner_size(),
-                        })
-                        .unwrap();
+                    log::error!("Surface lost!");
+                    world.send_event(AppExit);
                 }
                 SurfaceError::OutOfMemory => {
                     log::error!("Application is out of memory!");

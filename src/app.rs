@@ -1,15 +1,16 @@
-use std::sync::Arc;
-
+use bevy_a11y::AccessibilityPlugin;
+use bevy_input::InputPlugin;
+use bevy_time::TimePlugin;
+use bevy_window::{Window, WindowPlugin};
+use bevy_winit::WinitPlugin;
 use cfg_if::cfg_if;
 
 use crate::plugins::camera::CameraPlugin;
 use crate::plugins::debug::DebugPlugin;
 use crate::plugins::fps::FPSPlugin;
-use crate::plugins::input::InputPlugin;
 use crate::plugins::render::RenderPlugin;
 use crate::plugins::streaming::StreamingPlugin;
 use crate::plugins::wgpu::WGPUPlugin;
-use crate::plugins::winit::{Window, WinitPlugin};
 
 pub struct App;
 
@@ -18,16 +19,25 @@ impl App {
         setup_logger();
 
         let mut app = bevy_app::App::new();
-        app.add_plugins(WinitPlugin::new("point-cloud-canvas".to_string()));
-
-        WGPUPlugin::build(
-            Arc::clone(app.world.get_resource::<Window>().unwrap()),
-            &mut app,
-        )
-        .await;
 
         app.add_plugins((
+            TimePlugin,
             InputPlugin,
+            WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Point Cloud".to_string(),
+                    canvas: Some("#point-cloud-canvas".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            AccessibilityPlugin,
+            WinitPlugin::default(),
+        ));
+
+        WGPUPlugin::build(&mut app).await;
+
+        app.add_plugins((
             CameraPlugin,
             RenderPlugin,
             StreamingPlugin,

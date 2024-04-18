@@ -1,5 +1,6 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemState;
 use flume::{Receiver, Sender, TryRecvError};
 use glam::Vec3;
 use thousands::Separable;
@@ -9,6 +10,7 @@ use point_converter::metadata::Metadata;
 use crate::plugins::camera::Camera;
 use crate::plugins::streaming::metadata::loader::{spawn_metadata_loader, LoadedMetadataMsg};
 use crate::plugins::streaming::Source;
+use crate::plugins::wgpu::WinitWindow;
 use crate::transform::Transform;
 
 mod loader;
@@ -233,22 +235,19 @@ fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
 
     if ui.add_enabled(enabled, button).clicked() {
         let dir = {
-            let window: &winit::window::Window = world
-                .get_resource::<crate::plugins::winit::Window>()
-                .unwrap();
+            let mut params = SystemState::<WinitWindow>::new(world);
+            let winit_window = params.get(world);
 
             rfd::FileDialog::new()
                 .add_filter("metadata", &["json"])
-                .set_parent(window)
+                .set_parent(winit_window.get())
                 .pick_file()
                 .and_then(|it| it.parent().map(std::path::Path::to_path_buf))
         };
 
         if let Some(dir) = dir {
-            let mut params = bevy_ecs::system::SystemState::<(
-                ChannelsRes,
-                ResMut<NextState<MetadataState>>,
-            )>::new(world);
+            let mut params =
+                SystemState::<(ChannelsRes, ResMut<NextState<MetadataState>>)>::new(world);
             let (channels, mut next_metadata_state) = params.get_mut(world);
 
             next_metadata_state.set(MetadataState::Loading);

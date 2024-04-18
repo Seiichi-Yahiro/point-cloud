@@ -1,11 +1,12 @@
-use crate::plugins::camera::CameraControlSet;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_input::mouse::MouseWheel;
+use bevy_input::prelude::{KeyCode, MouseButton};
+use bevy_input::ButtonInput;
+use bevy_window::CursorMoved;
 use glam::{EulerRot, Quat, Vec3};
-use winit::event::{MouseButton, MouseScrollDelta};
-use winit::keyboard::KeyCode;
 
-use crate::plugins::input::{CursorEvent, MouseWheelEvent, PressedKeys, PressedMouseButtons};
+use crate::plugins::camera::CameraControlSet;
 use crate::transform::Transform;
 
 pub struct FlyCamPlugin;
@@ -71,9 +72,9 @@ impl Default for FlyCamKeybindings {
 
 fn update(
     mut query: Query<(&mut FlyCamController, &mut Transform)>,
-    pressed_keys: Res<PressedKeys>,
-    pressed_mouse_buttons: Res<PressedMouseButtons>,
-    mut cursor_events: EventReader<CursorEvent>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    mut cursor_moved_events: EventReader<CursorMoved>,
 ) {
     for (mut fly_cam, mut transform) in query.iter_mut() {
         let forward = transform.forward();
@@ -82,38 +83,40 @@ fn update(
 
         let mut velocity = Vec3::ZERO;
 
-        if pressed_keys.is_pressed(&fly_cam.keybindings.forward) {
+        if keyboard_input.pressed(fly_cam.keybindings.forward) {
             velocity += forward;
         }
 
-        if pressed_keys.is_pressed(&fly_cam.keybindings.backward) {
+        if keyboard_input.pressed(fly_cam.keybindings.backward) {
             velocity -= forward;
         }
 
-        if pressed_keys.is_pressed(&fly_cam.keybindings.left) {
+        if keyboard_input.pressed(fly_cam.keybindings.left) {
             velocity -= right;
         }
 
-        if pressed_keys.is_pressed(&fly_cam.keybindings.right) {
+        if keyboard_input.pressed(fly_cam.keybindings.right) {
             velocity += right;
         }
 
-        if pressed_keys.is_pressed(&fly_cam.keybindings.ascend) {
+        if keyboard_input.pressed(fly_cam.keybindings.ascend) {
             velocity += up;
         }
 
-        if pressed_keys.is_pressed(&fly_cam.keybindings.descend) {
+        if keyboard_input.pressed(fly_cam.keybindings.descend) {
             velocity -= up;
         }
 
         velocity = velocity.normalize_or_zero() * fly_cam.movement_speed;
 
-        fly_cam.look_around = pressed_mouse_buttons.is_pressed(&fly_cam.keybindings.look_around);
+        fly_cam.look_around = mouse_button_input.pressed(fly_cam.keybindings.look_around);
 
         if fly_cam.look_around {
-            for cursor_event in cursor_events.read() {
-                let relative_yaw = -cursor_event.delta.x as f32 * fly_cam.mouse_sensitivity;
-                let relative_pitch = -cursor_event.delta.y as f32 * fly_cam.mouse_sensitivity;
+            for cursor_event in cursor_moved_events.read() {
+                let delta = cursor_event.delta.unwrap_or_default();
+
+                let relative_yaw = -delta.x * fly_cam.mouse_sensitivity;
+                let relative_pitch = -delta.y * fly_cam.mouse_sensitivity;
 
                 transform.rotation *= Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
 
@@ -127,7 +130,7 @@ fn update(
                 transform.rotation *= Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
             }
         } else {
-            cursor_events.clear();
+            cursor_moved_events.clear();
         }
 
         if velocity != Vec3::ZERO {
@@ -138,7 +141,7 @@ fn update(
 
 fn update_movement_speed(
     mut query: Query<&mut FlyCamController>,
-    mut mouse_wheel_event: EventReader<MouseWheelEvent>,
+    mut mouse_wheel_events: EventReader<MouseWheel>,
 ) {
     let mut fly_cam = query.get_single_mut().unwrap();
 
@@ -146,16 +149,11 @@ fn update_movement_speed(
         return;
     }
 
-    for event in mouse_wheel_event.read() {
-        let y_delta = match event.delta {
-            MouseScrollDelta::LineDelta(_, y) => y,
-            MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-        };
-
-        let y_delta = if y_delta == 0.0 {
+    for event in mouse_wheel_events.read() {
+        let y_delta = if event.y == 0.0 {
             0.0
         } else {
-            y_delta.signum() * FlyCamController::MOVEMENT_SPEED_STEP
+            event.y.signum() * FlyCamController::MOVEMENT_SPEED_STEP
         };
 
         fly_cam.movement_speed = (fly_cam.movement_speed + y_delta).clamp(
