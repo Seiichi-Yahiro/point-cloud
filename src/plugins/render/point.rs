@@ -4,12 +4,13 @@ use glam::Vec3;
 
 use crate::plugins::camera::{Camera, ViewBindGroupLayout, Visibility};
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::render::{GlobalDepthTexture, GlobalRenderResources, RenderPassSet};
 use crate::plugins::streaming::cell::shader::{
     CellBindGroupData, CellBindGroupLayout, LoadedCellsBindGroupData,
 };
 use crate::plugins::streaming::metadata::shader::MetadataBindGroupData;
-use crate::plugins::wgpu::{Device, SurfaceConfig};
+use crate::plugins::wgpu::{
+    CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
+};
 use crate::texture::Texture;
 
 #[repr(C)]
@@ -37,7 +38,12 @@ pub struct PointRenderPlugin;
 impl Plugin for PointRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Last, draw.in_set(RenderPassSet::Point));
+            .add_systems(Render, draw.in_set(RenderPassSet));
+
+        app.world
+            .get_resource_mut::<CommandEncoders>()
+            .unwrap()
+            .register::<Self>();
     }
 }
 
@@ -113,38 +119,30 @@ fn setup(
 }
 
 fn draw(
-    mut global_render_resources: ResMut<GlobalRenderResources>,
-    depth_texture: Res<GlobalDepthTexture>,
+    mut global_render_resources: GlobalRenderResources,
     local_render_resources: Res<RenderResources>,
     camera_query: Query<&Camera>,
     vertex_buffers: Query<(&VertexBuffer<Point>, &CellBindGroupData, &Visibility)>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
     visible_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
 ) {
-    let global_render_resources = &mut *global_render_resources;
-
-    let mut render_pass =
-        global_render_resources
-            .encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
+    global_render_resources
+        .encoders
+        .encode::<PointRenderPlugin>(|encoder| {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &global_render_resources.view,
+                    view: &global_render_resources.render_view.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.16,
-                            g: 0.16,
-                            b: 0.16,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_texture.view,
+                    view: &global_render_resources.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -153,20 +151,21 @@ fn draw(
                 occlusion_query_set: None,
             });
 
-    for camera in camera_query.iter() {
-        render_pass.set_pipeline(&local_render_resources.pipeline);
-        render_pass.set_bind_group(0, &camera.bind_group, &[]);
-        render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
-        render_pass.set_bind_group(3, &visible_cells_bind_group_data.group, &[]);
+            for camera in camera_query.iter() {
+                render_pass.set_pipeline(&local_render_resources.pipeline);
+                render_pass.set_bind_group(0, &camera.bind_group, &[]);
+                render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
+                render_pass.set_bind_group(3, &visible_cells_bind_group_data.group, &[]);
 
-        for (vertex_buffer, cell_bind_group_data, visibility) in vertex_buffers.iter() {
-            if !visibility.visible {
-                continue;
-            };
+                for (vertex_buffer, cell_bind_group_data, visibility) in vertex_buffers.iter() {
+                    if !visibility.visible {
+                        continue;
+                    };
 
-            render_pass.set_bind_group(2, &cell_bind_group_data.group, &[]);
-            render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
-            render_pass.draw(0..4, 0..vertex_buffer.len());
-        }
-    }
+                    render_pass.set_bind_group(2, &cell_bind_group_data.group, &[]);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
+                    render_pass.draw(0..4, 0..vertex_buffer.len());
+                }
+            }
+        });
 }

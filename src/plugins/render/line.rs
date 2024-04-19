@@ -3,9 +3,10 @@ use bevy_ecs::prelude::*;
 use glam::Vec3;
 
 use crate::plugins::camera::{Camera, ViewBindGroupLayout};
-use crate::plugins::render::{GlobalDepthTexture, GlobalRenderResources, RenderPassSet};
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::wgpu::{Device, SurfaceConfig};
+use crate::plugins::wgpu::{
+    CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
+};
 use crate::texture::Texture;
 
 pub mod utils;
@@ -36,7 +37,12 @@ pub struct LineRenderPlugin;
 impl Plugin for LineRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Last, draw.in_set(RenderPassSet::Line));
+            .add_systems(Render, draw.in_set(RenderPassSet));
+
+        app.world
+            .get_resource_mut::<CommandEncoders>()
+            .unwrap()
+            .register::<Self>();
     }
 }
 
@@ -104,21 +110,18 @@ fn setup(
 }
 
 fn draw(
-    mut global_render_resources: ResMut<GlobalRenderResources>,
-    depth_texture: Res<GlobalDepthTexture>,
+    mut global_render_resources: GlobalRenderResources,
     local_render_resources: Res<RenderResources>,
     camera_query: Query<&Camera>,
     vertex_buffers: Query<&VertexBuffer<Line>>,
 ) {
-    let global_render_resources = &mut *global_render_resources;
-
-    let mut render_pass =
-        global_render_resources
-            .encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
+    global_render_resources
+        .encoders
+        .encode::<LineRenderPlugin>(|encoder| {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &global_render_resources.view,
+                    view: &global_render_resources.render_view.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -126,7 +129,7 @@ fn draw(
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_texture.view,
+                    view: &global_render_resources.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
@@ -137,13 +140,14 @@ fn draw(
                 occlusion_query_set: None,
             });
 
-    for camera in camera_query.iter() {
-        render_pass.set_pipeline(&local_render_resources.pipeline);
-        render_pass.set_bind_group(0, &camera.bind_group, &[]);
+            for camera in camera_query.iter() {
+                render_pass.set_pipeline(&local_render_resources.pipeline);
+                render_pass.set_bind_group(0, &camera.bind_group, &[]);
 
-        for vertex_buffer in vertex_buffers.iter() {
-            render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
-            render_pass.draw(0..4, 0..vertex_buffer.len());
-        }
-    }
+                for vertex_buffer in vertex_buffers.iter() {
+                    render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
+                    render_pass.draw(0..4, 0..vertex_buffer.len());
+                }
+            }
+        });
 }

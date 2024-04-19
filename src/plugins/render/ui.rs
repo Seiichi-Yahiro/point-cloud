@@ -1,12 +1,13 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use egui::{Context, Visuals};
 use egui::epaint::Shadow;
+use egui::{Context, Visuals};
 use egui_wgpu::{Renderer, ScreenDescriptor};
 use egui_winit::State;
 
-use crate::plugins::render::{GlobalRenderResources, RenderPassSet};
-use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
+use crate::plugins::wgpu::{
+    CommandEncoders, Device, GlobalRenderResources, Queue, Render, RenderPassSet, SurfaceConfig,
+};
 use crate::plugins::winit::{Window, WindowEvent};
 
 pub struct UiPlugin;
@@ -15,7 +16,12 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
             .add_systems(PreUpdate, handle_input)
-            .add_systems(Last, (prepare, ui, draw).chain().in_set(RenderPassSet::UI));
+            .add_systems(Render, (prepare, ui, draw).chain().in_set(RenderPassSet));
+
+        app.world
+            .get_resource_mut::<CommandEncoders>()
+            .unwrap()
+            .register::<Self>();
     }
 }
 
@@ -111,10 +117,8 @@ fn draw(
     device: Res<Device>,
     queue: Res<Queue>,
     config: Res<SurfaceConfig>,
-    mut global_render_resources: ResMut<GlobalRenderResources>,
+    mut global_render_resources: GlobalRenderResources,
 ) {
-    let global_render_resources = &mut *global_render_resources;
-
     let full_output = egui.context.end_frame();
 
     egui.state
@@ -134,21 +138,16 @@ fn draw(
         pixels_per_point: egui.context.pixels_per_point(),
     };
 
-    egui.renderer.update_buffers(
-        &device,
-        &queue,
-        &mut global_render_resources.encoder,
-        &tris,
-        &screen_descriptor,
-    );
+    global_render_resources
+        .encoders
+        .encode::<UiPlugin>(|encoder| {
+            egui.renderer
+                .update_buffers(&device, &queue, encoder, &tris, &screen_descriptor);
 
-    let mut rpass =
-        global_render_resources
-            .encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui-main-render-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &global_render_resources.view,
+                    view: &global_render_resources.render_view.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -160,9 +159,8 @@ fn draw(
                 occlusion_query_set: None,
             });
 
-    egui.renderer.render(&mut rpass, &tris, &screen_descriptor);
-
-    drop(rpass);
+            egui.renderer.render(&mut rpass, &tris, &screen_descriptor);
+        });
 
     for x in &full_output.textures_delta.free {
         egui.renderer.free_texture(x)
