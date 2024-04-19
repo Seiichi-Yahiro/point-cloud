@@ -103,12 +103,17 @@ struct GlobalRenderResources {
     encoder: wgpu::CommandEncoder,
 }
 
-fn prepare(world: &mut World, params: &mut SystemState<(Res<Surface>, Res<Device>, Res<Window>)>) {
-    let (surface, device, window) = params.get(world);
+fn prepare(
+    world: &mut World,
+    params: &mut SystemState<(Res<Surface>, Res<Device>, Res<Queue>, Res<Window>)>,
+) {
+    let (surface, device, queue, window) = params.get(world);
 
     let frame = match surface.get_current_texture() {
         Ok(frame) => frame,
         Err(err) => {
+            queue.submit(None);
+
             match err {
                 SurfaceError::Timeout => {
                     log::warn!("Timeout while trying to acquire next frame!")
@@ -128,7 +133,6 @@ fn prepare(world: &mut World, params: &mut SystemState<(Res<Surface>, Res<Device
                     world.send_event(AppExit);
                 }
             }
-
             return;
         }
     };

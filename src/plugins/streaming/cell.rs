@@ -71,7 +71,12 @@ impl Plugin for CellPlugin {
             )
             .add_systems(OnEnter(MetadataState::Loaded), set_view_distance)
             .add_systems(OnExit(MetadataState::Loaded), cleanup_cells)
-            .add_systems(PostUpdate, shader::update_loaded_cells_buffer);
+            .add_systems(
+                PostUpdate,
+                shader::update_loaded_cells_buffer
+                    .run_if(in_state(MetadataState::Loaded))
+                    .run_if(in_state(StreamState::Enabled)),
+            );
     }
 }
 

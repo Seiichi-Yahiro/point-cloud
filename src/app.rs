@@ -29,10 +29,10 @@ impl App {
         app.add_plugins((
             InputPlugin,
             CameraPlugin,
-            RenderPlugin,
             StreamingPlugin,
             FPSPlugin,
             DebugPlugin,
+            RenderPlugin,
         ))
         .run();
     }
