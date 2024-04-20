@@ -7,7 +7,7 @@ use itertools::Itertools;
 use point_converter::convert_from_paths;
 
 /// Point converter will convert your points to a format that the point cloud renderer can use.
-/// Currently supported file formats are las/laz and ply.
+/// Currently supported file formats are las/laz and ply and the generated metadata.json.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None, verbatim_doc_comment)]
 struct Args {

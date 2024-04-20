@@ -21,7 +21,7 @@ impl CellId {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn path(&self, working_dir: &Path) -> std::path::PathBuf {
         working_dir
-            .join(self.hierarchy_string())
+            .join(Metadata::hierarchy_string(self.hierarchy))
             .join(self.index_string())
             .with_extension(self.extension())
     }
@@ -29,13 +29,9 @@ impl CellId {
     #[cfg(target_arch = "wasm32")]
     pub fn path(&self) -> [String; 2] {
         [
-            self.hierarchy_string(),
+            Metadata::hierarchy_string(self.hierarchy),
             format!("{}.{}", self.index_string(), self.extension()),
         ]
-    }
-
-    pub fn hierarchy_string(&self) -> String {
-        format!("h_{}", self.hierarchy)
     }
 
     pub fn index_string(&self) -> String {

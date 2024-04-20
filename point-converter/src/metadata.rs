@@ -39,6 +39,10 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    pub fn hierarchy_string(hierarchy: u32) -> String {
+        format!("h_{}", hierarchy)
+    }
+
     pub fn number_of_sub_grid_cells(&self) -> u32 {
         self.sub_grid_dimension.pow(3)
     }
