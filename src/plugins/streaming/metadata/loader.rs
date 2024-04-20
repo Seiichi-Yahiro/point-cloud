@@ -42,7 +42,9 @@ async fn load_from_source(source: Source, sender: Sender<LoadedMetadataMsg>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn load_from_directory(dir: &Directory) -> Result<Metadata, LoadError> {
-    let path = dir.join("metadata").with_extension("json");
+    let path = dir
+        .join(Metadata::FILE_NAME)
+        .with_extension(Metadata::EXTENSION);
     Metadata::from_path(path)
 }
 
@@ -50,7 +52,8 @@ async fn load_from_directory(dir: &Directory) -> Result<Metadata, LoadError> {
 async fn load_from_directory(dir: &Directory) -> Result<Metadata, LoadError> {
     use wasm_bindgen::JsCast;
 
-    let buffer = crate::web::readBytes(dir, "metadata.json").await?;
+    let file_name = format!("{}.{}", Metadata::FILE_NAME, Metadata::EXTENSION);
+    let buffer = crate::web::readBytes(dir, &file_name).await?;
     let array_buffer = buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap();
 
     let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();

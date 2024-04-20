@@ -166,8 +166,8 @@ impl Converter {
     pub fn save_metadata(&self) -> Result<(), std::io::Error> {
         let path = self
             .working_directory
-            .join("metadata")
-            .with_extension("json");
+            .join(Metadata::FILE_NAME)
+            .with_extension(Metadata::EXTENSION);
 
         let file = File::create(path)?;
         let mut buf_writer = BufWriter::new(file);

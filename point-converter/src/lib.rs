@@ -31,7 +31,7 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
                         log::error!("Failed, {:?}", err);
                     }
                 }
-                "json" => {
+                metadata::Metadata::EXTENSION => {
                     if let Err(err) = converter::convert_own(path, &mut converter) {
                         log::error!("Failed, {:?}", err);
                     }
@@ -51,7 +51,11 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
-    match std::fs::read(output.join("metadata").with_extension("bin")) {
+    match std::fs::read(
+        output
+            .join(metadata::Metadata::FILE_NAME)
+            .with_extension(metadata::Metadata::EXTENSION),
+    ) {
         Ok(bytes) => {
             log::info!("Found an existing metadata file.");
             metadata::Metadata::read_from(&mut std::io::Cursor::new(bytes)).unwrap()

@@ -238,7 +238,7 @@ fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
                 .unwrap();
 
             rfd::FileDialog::new()
-                .add_filter("metadata", &["json"])
+                .add_filter(Metadata::FILE_NAME, &[Metadata::EXTENSION])
                 .set_parent(window)
                 .pick_file()
                 .and_then(|it| it.parent().map(std::path::Path::to_path_buf))

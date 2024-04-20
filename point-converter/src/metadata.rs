@@ -39,6 +39,9 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    pub const FILE_NAME: &'static str = "metadata";
+    pub const EXTENSION: &'static str = "json";
+
     pub fn hierarchy_string(hierarchy: u32) -> String {
         format!("h_{}", hierarchy)
     }
