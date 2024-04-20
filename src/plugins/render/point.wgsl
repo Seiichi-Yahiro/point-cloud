@@ -88,11 +88,9 @@ fn get_splat_radius(position: vec3<f32>) -> f32 {
     }
     
     var hierarchy = metadata.hierarchies[current_hierarchy];
-    var index = cell_index(position, hierarchy.cell_size);
+    var index = cell_index(position, hierarchy.cell_size);  
     
-    var i = 0u;
-    
-    while i < loaded_cells.len {
+    for (var i = 0u; i < loaded_cells.len; i += 1u) {
         let cell = loaded_cells.cells[i];
         
         if cell.hierarchy == current_hierarchy {
@@ -106,8 +104,6 @@ fn get_splat_radius(position: vec3<f32>) -> f32 {
         } else if cell.hierarchy > current_hierarchy {
             return spacing;
         }
-        
-        i = i + 1;
     }
    
    return spacing;
