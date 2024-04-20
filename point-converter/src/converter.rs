@@ -11,7 +11,7 @@ use std::hash::BuildHasherDefault;
 use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use caches::{Cache, DefaultEvictCallback, PutResult, RawLRU};
+use caches::{Cache, LRUCache, PutResult};
 use glam::Vec3;
 use rustc_hash::FxHasher;
 
@@ -22,7 +22,7 @@ use crate::point::Point;
 pub struct Converter {
     metadata: Metadata,
     working_directory: PathBuf,
-    cell_cache: RawLRU<CellId, Cell, DefaultEvictCallback, BuildHasherDefault<FxHasher>>,
+    cell_cache: LRUCache<CellId, Cell, BuildHasherDefault<FxHasher>>,
 }
 
 impl Converter {
@@ -39,7 +39,7 @@ impl Converter {
         Self {
             metadata,
             working_directory: working_directory.to_path_buf(),
-            cell_cache: RawLRU::with_hasher(100, BuildHasherDefault::default()).unwrap(),
+            cell_cache: LRUCache::with_hasher(100, BuildHasherDefault::default()).unwrap(),
         }
     }
 

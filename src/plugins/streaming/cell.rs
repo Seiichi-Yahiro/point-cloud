@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bytesize::ByteSize;
-use caches::{Cache, DefaultEvictCallback, RawLRU};
+use caches::{Cache, LRUCache};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
 use glam::{IVec3, Vec3, Vec4};
@@ -126,11 +126,11 @@ pub struct CellData {
 struct LoadedCells(FxHashMap<CellId, Entity>);
 
 #[derive(Resource)]
-struct MissingCells(RawLRU<CellId, (), DefaultEvictCallback, BuildHasherDefault<FxHasher>>);
+struct MissingCells(LRUCache<CellId, (), BuildHasherDefault<FxHasher>>);
 
 impl Default for MissingCells {
     fn default() -> Self {
-        Self(RawLRU::with_hasher(10000, BuildHasherDefault::default()).unwrap())
+        Self(LRUCache::with_hasher(10000, BuildHasherDefault::default()).unwrap())
     }
 }
 
