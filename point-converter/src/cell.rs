@@ -23,23 +23,19 @@ impl CellId {
         working_dir
             .join(Metadata::hierarchy_string(self.hierarchy))
             .join(self.index_string())
-            .with_extension(self.extension())
+            .with_extension(Cell::EXTENSION)
     }
 
     #[cfg(target_arch = "wasm32")]
     pub fn path(&self) -> [String; 2] {
         [
             Metadata::hierarchy_string(self.hierarchy),
-            format!("{}.{}", self.index_string(), self.extension()),
+            format!("{}.{}", self.index_string(), Cell::EXTENSION),
         ]
     }
 
     pub fn index_string(&self) -> String {
         format!("c_{}_{}_{}", self.index.x, self.index.y, self.index.z)
-    }
-
-    pub fn extension(&self) -> &str {
-        "bin"
     }
 }
 
@@ -51,6 +47,8 @@ pub struct Cell {
 }
 
 impl Cell {
+    pub const EXTENSION: &'static str = "bin";
+
     pub fn new(capacity: usize, size: f32, pos: Vec3) -> Self {
         Self {
             header: Header::new(size, pos),
