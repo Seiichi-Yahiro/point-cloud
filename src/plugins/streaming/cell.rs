@@ -75,7 +75,8 @@ impl Plugin for CellPlugin {
                 PostUpdate,
                 shader::update_loaded_cells_buffer
                     .run_if(in_state(MetadataState::Loaded))
-                    .run_if(in_state(StreamState::Enabled)),
+                    .run_if(in_state(StreamState::Enabled))
+                    .run_if(resource_changed::<LoadedCells>),
             );
     }
 }
