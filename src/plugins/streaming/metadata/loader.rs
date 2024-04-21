@@ -15,9 +15,12 @@ pub fn spawn_metadata_loader(source: Source, sender: Sender<LoadedMetadataMsg>) 
     log::debug!("Spawning metadata loader thread");
 
     #[cfg(not(target_arch = "wasm32"))]
-    std::thread::spawn(move || {
-        pollster::block_on(load_from_source(source, sender));
-    });
+    std::thread::Builder::new()
+        .name("Metadata Loader".to_string())
+        .spawn(move || {
+            pollster::block_on(load_from_source(source, sender));
+        })
+        .expect("Failed to spawn metadata loader thread");
 
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen_futures::spawn_local(load_from_source(source, sender));

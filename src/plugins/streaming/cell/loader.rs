@@ -30,9 +30,12 @@ pub fn spawn_cell_loader(receiver: Receiver<LoadCellMsg>, sender: Sender<LoadedC
     };
 
     #[cfg(not(target_arch = "wasm32"))]
-    std::thread::spawn(move || {
-        pollster::block_on(future);
-    });
+    std::thread::Builder::new()
+        .name("Cell Loader".to_string())
+        .spawn(move || {
+            pollster::block_on(future);
+        })
+        .expect("Failed to spawn cell loader thread");
 
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen_futures::spawn_local(future);
