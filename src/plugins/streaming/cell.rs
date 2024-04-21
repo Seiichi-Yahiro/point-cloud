@@ -13,7 +13,7 @@ use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
 
-use point_converter::cell::CellId;
+use point_converter::cell::{Cell, CellId};
 
 use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
@@ -201,6 +201,50 @@ fn cleanup_cells(
     }
 }
 
+#[derive(Bundle)]
+struct CellBundle {
+    cell_data: CellData,
+    vertex_buffer: VertexBuffer<Point>,
+    bind_group_data: CellBindGroupData,
+    visibility: Visibility,
+}
+
+impl CellBundle {
+    fn new(
+        id: CellId,
+        cell: Cell,
+        device: &wgpu::Device,
+        cell_bind_group_layout: &CellBindGroupLayout,
+    ) -> Self {
+        let points = cell
+            .points()
+            .iter()
+            .map(|it| Point {
+                position: it.pos,
+                color: it.color,
+            })
+            .collect_vec();
+
+        let vertex_buffer = VertexBuffer::new(device, &points);
+        let bind_group_data = CellBindGroupData::new(device, cell_bind_group_layout, id);
+
+        let header = cell.header();
+        let cell_data = CellData {
+            id,
+            pos: header.pos,
+            size: header.size,
+            number_of_points: header.number_of_points,
+        };
+
+        Self {
+            cell_data,
+            vertex_buffer,
+            bind_group_data,
+            visibility: Visibility::new(true),
+        }
+    }
+}
+
 fn receive_cell(
     mut commands: Commands,
     channels: ChannelsRes,
@@ -222,41 +266,10 @@ fn receive_cell(
                     Ok(Some(cell)) => {
                         log::debug!("Loaded cell: {:?}", id);
 
-                        let points = cell
-                            .points()
-                            .iter()
-                            .map(|it| crate::plugins::render::point::Point {
-                                position: it.pos,
-                                color: it.color,
-                            })
-                            .collect_vec();
+                        let cell_bundle =
+                            CellBundle::new(id, cell, &device, &cell_bind_group_layout);
 
-                        let vertex_buffer = VertexBuffer::new(&device, &points);
-                        let cell_bind_group_data =
-                            CellBindGroupData::new(&device, &cell_bind_group_layout, id);
-
-                        let header = cell.header();
-                        let cell_data = CellData {
-                            id,
-                            pos: header.pos,
-                            size: header.size,
-                            number_of_points: header.number_of_points,
-                        };
-
-                        let aabb = Aabb::new(
-                            cell_data.pos - cell_data.size / 2.0,
-                            cell_data.pos + cell_data.size / 2.0,
-                        );
-
-                        let entity = commands
-                            .spawn((
-                                cell_data,
-                                vertex_buffer,
-                                cell_bind_group_data,
-                                aabb,
-                                Visibility::new(true),
-                            ))
-                            .id();
+                        let entity = commands.spawn(cell_bundle).id();
 
                         loaded_cells.0.insert(id, entity);
                     }
