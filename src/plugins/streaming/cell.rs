@@ -56,6 +56,7 @@ impl Plugin for CellPlugin {
             .insert_resource(LoadedCells::default())
             .insert_resource(MissingCells::default())
             .insert_resource(LoadingCells::default())
+            .insert_resource(Stats::default())
             .add_systems(PostStartup, frustums::add_streaming_frustums)
             .add_systems(
                 Update,
@@ -65,7 +66,10 @@ impl Plugin for CellPlugin {
                         frustums::update_streaming_frustums.after(UpdateFrustum),
                     ),
                     update_cells,
-                    enqueue_cells_to_load,
+                    (
+                        enqueue_cells_to_load,
+                        count_points.run_if(resource_changed::<LoadedCells>),
+                    ),
                 )
                     .chain()
                     .run_if(in_state(MetadataState::Loaded))
@@ -185,7 +189,7 @@ fn cleanup_cells(
     loading_cells.should_load.clear();
     loading_cells.loading.clear();
     loaded_cells.0.clear();
-    *missing_cells = MissingCells::default();
+    missing_cells.0.purge();
 
     for entity in cell_query.iter() {
         commands.entity(entity).despawn();
@@ -325,8 +329,8 @@ fn update_cells(
 
             // copy or insert cells that need to be loaded
             for cell_to_load in ids {
-                if let Some(status) = loaded_cells.0.remove(&cell_to_load.id) {
-                    new_loaded.insert(cell_to_load.id, status);
+                if let Some(entity) = loaded_cells.0.remove(&cell_to_load.id) {
+                    new_loaded.insert(cell_to_load.id, entity);
                 } else if loading_cells.should_load.remove(&cell_to_load)
                     || !loading_cells.loading.contains(&cell_to_load.id)
                 {
@@ -369,6 +373,21 @@ fn enqueue_cells_to_load(
     }
 }
 
+#[derive(Default, Resource)]
+struct Stats {
+    loaded_points: u64,
+    loaded_points_byte_size: u64,
+}
+
+fn count_points(cell_header_query: Query<&CellHeader>, mut stats: ResMut<Stats>) {
+    let total_points = cell_header_query
+        .iter()
+        .map(|header| header.0.number_of_points as u64)
+        .sum();
+    stats.loaded_points = total_points;
+    stats.loaded_points_byte_size = std::mem::size_of::<Point>() as u64 * total_points;
+}
+
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     {
         let mut is_streaming_paused =
@@ -409,15 +428,14 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     }
 
     {
-        let mut query = world.query::<&CellHeader>();
-        let sum = query
-            .iter(world)
-            .map(|header| header.0.number_of_points)
-            .sum::<u32>();
-        ui.label(format!("Loaded points: {}", sum.separate_with_commas()));
+        let stats = world.get_resource::<Stats>().unwrap();
+        ui.label(format!(
+            "Loaded points: {}",
+            stats.loaded_points.separate_with_commas()
+        ));
         ui.label(format!(
             "Loaded size: {}",
-            ByteSize(sum as u64 * std::mem::size_of::<Point>() as u64)
+            ByteSize(stats.loaded_points_byte_size)
         ));
     }
 }
