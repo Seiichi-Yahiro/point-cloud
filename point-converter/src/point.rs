@@ -1,7 +1,9 @@
 use std::io::{Read, Write};
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ReadBytesExt, WriteBytesExt};
 use glam::Vec3;
+
+use crate::Endianess;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Point {
@@ -22,9 +24,9 @@ impl Default for Point {
 
 impl Point {
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
-        writer.write_f32::<BigEndian>(self.pos.x)?;
-        writer.write_f32::<BigEndian>(self.pos.y)?;
-        writer.write_f32::<BigEndian>(self.pos.z)?;
+        writer.write_f32::<Endianess>(self.pos.x)?;
+        writer.write_f32::<Endianess>(self.pos.y)?;
+        writer.write_f32::<Endianess>(self.pos.z)?;
 
         writer.write_u8(self.color[0])?;
         writer.write_u8(self.color[1])?;
@@ -35,9 +37,9 @@ impl Point {
     }
 
     pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
-        let x = reader.read_f32::<BigEndian>()?;
-        let y = reader.read_f32::<BigEndian>()?;
-        let z = reader.read_f32::<BigEndian>()?;
+        let x = reader.read_f32::<Endianess>()?;
+        let y = reader.read_f32::<Endianess>()?;
+        let z = reader.read_f32::<Endianess>()?;
 
         let r = reader.read_u8()?;
         let g = reader.read_u8()?;

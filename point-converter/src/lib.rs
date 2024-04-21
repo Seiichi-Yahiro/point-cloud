@@ -1,3 +1,5 @@
+pub(crate) use byteorder::LittleEndian as Endianess;
+
 pub mod cell;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod converter;

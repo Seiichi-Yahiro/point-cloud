@@ -2,7 +2,7 @@ use std::hash::BuildHasherDefault;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ReadBytesExt, WriteBytesExt};
 use glam::{IVec3, UVec3, Vec3};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -10,6 +10,7 @@ use rustc_hash::FxHashSet;
 
 use crate::metadata::Metadata;
 use crate::point::Point;
+use crate::Endianess;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct CellId {
@@ -49,9 +50,9 @@ pub struct Cell {
 impl Cell {
     pub const EXTENSION: &'static str = "bin";
 
-    pub fn new(capacity: usize, size: f32, pos: Vec3) -> Self {
+    pub fn new(id: CellId, size: f32, pos: Vec3, capacity: usize) -> Self {
         Self {
-            header: Header::new(size, pos),
+            header: Header::new(id, size, pos),
             points: Vec::with_capacity(capacity),
             grid: None,
         }
@@ -197,6 +198,9 @@ pub enum CellAddPointError {
 
 #[derive(Debug)]
 pub struct Header {
+    /// A unique id over all cells
+    pub id: CellId,
+
     /// Number of points in this cell.
     pub number_of_points: u32,
 
@@ -212,8 +216,9 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn new(size: f32, pos: Vec3) -> Self {
+    pub fn new(id: CellId, size: f32, pos: Vec3) -> Self {
         Self {
+            id,
             number_of_points: 0,
             has_grid: false,
             size,
@@ -235,29 +240,51 @@ impl Header {
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
-        writer.write_u32::<BigEndian>(self.number_of_points)?;
+        writer.write_u32::<Endianess>(self.id.hierarchy)?;
+        writer.write_i32::<Endianess>(self.id.index.x)?;
+        writer.write_i32::<Endianess>(self.id.index.y)?;
+        writer.write_i32::<Endianess>(self.id.index.z)?;
+
+        writer.write_u32::<Endianess>(self.number_of_points)?;
         writer.write_u8(self.has_grid as u8)?;
-        writer.write_f32::<BigEndian>(self.size)?;
-        writer.write_f32::<BigEndian>(self.pos.x)?;
-        writer.write_f32::<BigEndian>(self.pos.y)?;
-        writer.write_f32::<BigEndian>(self.pos.z)?;
+        writer.write_f32::<Endianess>(self.size)?;
+
+        writer.write_f32::<Endianess>(self.pos.x)?;
+        writer.write_f32::<Endianess>(self.pos.y)?;
+        writer.write_f32::<Endianess>(self.pos.z)?;
 
         Ok(())
     }
 
     pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
-        let number_of_points = reader.read_u32::<BigEndian>()?;
+        let id = {
+            let hierarchy = reader.read_u32::<Endianess>()?;
+            let x = reader.read_i32::<Endianess>()?;
+            let y = reader.read_i32::<Endianess>()?;
+            let z = reader.read_i32::<Endianess>()?;
+            CellId {
+                hierarchy,
+                index: IVec3::new(x, y, z),
+            }
+        };
+
+        let number_of_points = reader.read_u32::<Endianess>()?;
         let has_grid = reader.read_u8()? != 0;
-        let size = reader.read_f32::<BigEndian>()?;
-        let x = reader.read_f32::<BigEndian>()?;
-        let y = reader.read_f32::<BigEndian>()?;
-        let z = reader.read_f32::<BigEndian>()?;
+        let size = reader.read_f32::<Endianess>()?;
+
+        let pos = {
+            let x = reader.read_f32::<Endianess>()?;
+            let y = reader.read_f32::<Endianess>()?;
+            let z = reader.read_f32::<Endianess>()?;
+            Vec3::new(x, y, z)
+        };
 
         Ok(Self {
+            id,
             number_of_points,
             has_grid,
             size,
-            pos: Vec3::new(x, y, z),
+            pos,
         })
     }
 }

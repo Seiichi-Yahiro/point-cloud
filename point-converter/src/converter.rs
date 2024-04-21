@@ -73,6 +73,7 @@ impl Converter {
         if !self.cell_cache.contains(&cell_id) {
             let cell = self.load_or_create_cell(
                 &cell_id.path(&self.working_directory),
+                cell_id,
                 cell_size,
                 cell_pos,
             );
@@ -130,14 +131,21 @@ impl Converter {
         })
     }
 
-    fn load_or_create_cell(&self, cell_path: &Path, cell_size: f32, cell_pos: Vec3) -> Cell {
+    fn load_or_create_cell(
+        &self,
+        cell_path: &Path,
+        id: CellId,
+        cell_size: f32,
+        cell_pos: Vec3,
+    ) -> Cell {
         match self.load_cell(cell_path) {
             Ok(cell) => cell,
             Err(err) => match err.kind() {
                 ErrorKind::NotFound => Cell::new(
-                    self.metadata.number_of_sub_grid_cells() as usize,
+                    id,
                     cell_size,
                     cell_pos,
+                    self.metadata.number_of_sub_grid_cells() as usize,
                 ),
                 _ => {
                     panic!("{:?}", err);
