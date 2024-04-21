@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::hash::BuildHasherDefault;
-use std::ops::{Deref, DerefMut};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -9,14 +8,14 @@ use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
-use glam::{IVec3, Vec3, Vec4};
+use glam::Vec3;
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
 
 use point_converter::cell::CellId;
 
-use crate::plugins::camera::frustum::{Aabb, Corners, Frustum};
+use crate::plugins::camera::frustum::{Aabb, Frustum};
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::render::point::Point;
@@ -27,6 +26,7 @@ use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
+pub mod frustums;
 mod loader;
 pub mod shader;
 
@@ -53,15 +53,18 @@ impl Plugin for CellPlugin {
         shader::setup(&mut app.world);
 
         app.insert_state(StreamState::Enabled)
-            .insert_resource(StreamingFrustumsScale::default())
+            .insert_resource(frustums::StreamingFrustumsScale::default())
             .insert_resource(LoadedCells::default())
             .insert_resource(MissingCells::default())
             .insert_resource(LoadingCells::default())
-            .add_systems(PostStartup, add_streaming_frustums)
+            .add_systems(PostStartup, frustums::add_streaming_frustums)
             .add_systems(
                 Update,
                 (
-                    (receive_cell, update_streaming_frustums.after(UpdateFrustum)),
+                    (
+                        receive_cell,
+                        frustums::update_streaming_frustums.after(UpdateFrustum),
+                    ),
                     update_cells,
                     enqueue_cells_to_load,
                 )
@@ -181,43 +184,6 @@ impl Ord for CellToLoad {
     }
 }
 
-#[derive(Resource)]
-struct StreamingFrustumsScale(f32);
-
-impl StreamingFrustumsScale {
-    const MIN: f32 = 1.0;
-    const MAX: f32 = 5.0;
-}
-
-impl Default for StreamingFrustumsScale {
-    fn default() -> Self {
-        Self(2.0)
-    }
-}
-
-#[derive(Debug)]
-pub struct StreamingFrustum {
-    pub far_corners: Corners,
-    pub far_plane: Vec4,
-    pub aabb: Aabb,
-}
-
-#[derive(Debug, Component)]
-pub struct StreamingFrustums(Vec<StreamingFrustum>);
-
-impl Deref for StreamingFrustums {
-    type Target = Vec<StreamingFrustum>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for StreamingFrustums {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 fn cleanup_cells(
     mut commands: Commands,
     cell_query: Query<Entity, With<CellData>>,
@@ -314,82 +280,11 @@ fn receive_cell(
     }
 }
 
-fn add_streaming_frustums(mut commands: Commands, camera_query: Query<Entity, With<Camera>>) {
-    for entity in camera_query.iter() {
-        commands
-            .entity(entity)
-            .insert(StreamingFrustums(Vec::new()));
-    }
-}
-
-fn update_streaming_frustums(
-    active_metadata: ActiveMetadataRes,
-    mut camera_query: Query<
-        (
-            &Transform,
-            &PerspectiveProjection,
-            Ref<Frustum>,
-            &mut StreamingFrustums,
-        ),
-        With<Camera>,
-    >,
-    streaming_frustums_scale: Res<StreamingFrustumsScale>,
-) {
-    let metadata = &active_metadata.metadata;
-
-    for (transform, projection, frustum, mut streaming_frustums) in camera_query.iter_mut() {
-        if !(frustum.is_changed() || streaming_frustums_scale.is_changed()) {
-            continue;
-        }
-
-        let mut new_projection = projection.clone();
-
-        let near_aabb = {
-            let mut near_corners_iter = frustum.near.iter().copied();
-            let first_corner = near_corners_iter.next().unwrap();
-            near_corners_iter.fold(Aabb::new(first_corner, first_corner), |mut acc, corner| {
-                acc.extend(corner);
-                acc
-            })
-        };
-
-        let forward = transform.forward();
-        let far_normal = frustum.planes.far.truncate();
-
-        **streaming_frustums = (0..metadata.hierarchies)
-            .map(|hierarchy| {
-                let cell_size = metadata.cell_size(hierarchy);
-                let far_distance = (cell_size * streaming_frustums_scale.0).min(projection.far);
-                let center_on_far_plane = transform.translation + far_distance * forward;
-
-                new_projection.far = far_distance;
-                let far_corners = Frustum::far_corners(transform, &new_projection);
-
-                let mut aabb = far_corners
-                    .iter()
-                    .copied()
-                    .fold(near_aabb, |mut acc, corner| {
-                        acc.extend(corner);
-                        acc
-                    });
-
-                aabb.clamp(metadata.bounding_box.min, metadata.bounding_box.max);
-
-                StreamingFrustum {
-                    far_corners,
-                    far_plane: far_normal.extend(center_on_far_plane.dot(far_normal)),
-                    aabb,
-                }
-            })
-            .collect();
-    }
-}
-
 fn update_cells(
     mut commands: Commands,
     camera_query: Query<
-        (&StreamingFrustums, &Transform, &Frustum),
-        (With<Camera>, Changed<StreamingFrustums>),
+        (&frustums::StreamingFrustums, &Transform, &Frustum),
+        (With<Camera>, Changed<frustums::StreamingFrustums>),
     >,
     active_metadata: ActiveMetadataRes,
     mut loaded_cells: ResMut<LoadedCells>,
@@ -408,15 +303,11 @@ fn update_cells(
 
             let cell_size = metadata.cell_size(hierarchy);
             let half_cell_size = cell_size / 2.0;
-            let min_cell_index = metadata.cell_index(streaming_frustum.aabb.min, cell_size);
-            let max_cell_index = metadata.cell_index(streaming_frustum.aabb.max, cell_size);
 
             frustum_planes.far = streaming_frustum.far_plane;
 
-            let ids = (min_cell_index.x..=max_cell_index.x)
-                .cartesian_product(min_cell_index.y..=max_cell_index.y)
-                .cartesian_product(min_cell_index.z..=max_cell_index.z)
-                .map(|((x, y), z)| IVec3::new(x, y, z))
+            let ids = streaming_frustum
+                .cell_indices()
                 .map(move |index| CellId { index, hierarchy })
                 .filter(|cell_id| missing_cells.0.get(cell_id).is_none())
                 .filter(|cell_id| {
@@ -504,23 +395,7 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         }
     }
 
-    {
-        ui.label("Load distance scale:");
-
-        let mut streaming_frustums_scale =
-            world.get_resource_mut::<StreamingFrustumsScale>().unwrap();
-        let mut scale = streaming_frustums_scale.0;
-
-        let slider = egui::Slider::new(
-            &mut scale,
-            StreamingFrustumsScale::MIN..=StreamingFrustumsScale::MAX,
-        )
-        .step_by(0.1);
-
-        if ui.add(slider).changed() {
-            streaming_frustums_scale.0 = scale;
-        }
-    }
+    frustums::draw_ui(ui, world);
 
     {
         let loaded_cells = world.get_resource::<LoadedCells>().unwrap();
