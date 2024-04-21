@@ -9,7 +9,7 @@ use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::line::Line;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::frustums::StreamingFrustums;
-use crate::plugins::streaming::cell::CellData;
+use crate::plugins::streaming::cell::CellHeader;
 use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 
@@ -233,18 +233,18 @@ fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadataR
 fn add_grid_for_new_cells(
     mut commands: Commands,
     device: Res<Device>,
-    cell_query: Query<(Entity, &CellData), Added<CellData>>,
+    cell_query: Query<(Entity, &CellHeader), Added<CellHeader>>,
     state: Res<State>,
 ) {
     if !state.grid.show {
         return;
     }
 
-    for (entity, cell_data) in cell_query.iter() {
+    for (entity, cell_header) in cell_query.iter() {
         if !state
             .grid
             .hierarchies
-            .get(cell_data.id.hierarchy as usize)
+            .get(cell_header.0.id.hierarchy as usize)
             .copied()
             .unwrap_or(false)
         {
@@ -254,7 +254,7 @@ fn add_grid_for_new_cells(
         let lines = line_box(
             [
                 255,
-                if cell_data.id.hierarchy % 2 == 0 {
+                if cell_header.0.id.hierarchy % 2 == 0 {
                     180
                 } else {
                     90
@@ -262,8 +262,8 @@ fn add_grid_for_new_cells(
                 0,
                 255,
             ],
-            cell_data.pos,
-            Vec3::splat(cell_data.size / 2.0),
+            cell_header.0.pos,
+            Vec3::splat(cell_header.0.size / 2.0),
         );
 
         let buffer = VertexBuffer::new(&device, &lines);
@@ -275,16 +275,16 @@ fn toggle_grid(
     In((show, hierarchy)): In<(bool, u32)>,
     mut commands: Commands,
     device: Res<Device>,
-    add_query: Query<(Entity, &CellData), Without<VertexBuffer<Line>>>,
-    remove_query: Query<(Entity, &CellData), With<VertexBuffer<Line>>>,
+    add_query: Query<(Entity, &CellHeader), Without<VertexBuffer<Line>>>,
+    remove_query: Query<(Entity, &CellHeader), With<VertexBuffer<Line>>>,
 ) {
     if show {
-        for (entity, cell_data) in add_query.iter() {
-            if cell_data.id.hierarchy == hierarchy {
+        for (entity, cell_header) in add_query.iter() {
+            if cell_header.0.id.hierarchy == hierarchy {
                 let lines = line_box(
                     [255, if hierarchy % 2 == 0 { 180 } else { 90 }, 0, 255],
-                    cell_data.pos,
-                    Vec3::splat(cell_data.size / 2.0),
+                    cell_header.0.pos,
+                    Vec3::splat(cell_header.0.size / 2.0),
                 );
 
                 let buffer = VertexBuffer::new(&device, &lines);
@@ -292,8 +292,8 @@ fn toggle_grid(
             }
         }
     } else {
-        for (entity, cell_data) in remove_query.iter() {
-            if cell_data.id.hierarchy == hierarchy {
+        for (entity, cell_header) in remove_query.iter() {
+            if cell_header.0.id.hierarchy == hierarchy {
                 commands.entity(entity).remove::<VertexBuffer<Line>>();
             }
         }
@@ -340,17 +340,17 @@ fn toggle_streaming_frustums(
 
 fn set_visibility_for_new_cells(
     state: Res<State>,
-    mut cell_query: Query<(&CellData, &mut Visibility), Added<CellData>>,
+    mut cell_query: Query<(&CellHeader, &mut Visibility), Added<CellHeader>>,
 ) {
     if state.hierarchy_visibility.show_all {
         return;
     }
 
-    for (cell_data, mut visibility) in cell_query.iter_mut() {
+    for (cell_header, mut visibility) in cell_query.iter_mut() {
         visibility.visible = state
             .hierarchy_visibility
             .hierarchies
-            .get(cell_data.id.hierarchy as usize)
+            .get(cell_header.0.id.hierarchy as usize)
             .copied()
             .unwrap_or(true);
     }
@@ -358,10 +358,10 @@ fn set_visibility_for_new_cells(
 
 fn toggle_hierarchy(
     In((show, hierarchy)): In<(bool, u32)>,
-    mut cell_query: Query<(&CellData, &mut Visibility)>,
+    mut cell_query: Query<(&CellHeader, &mut Visibility)>,
 ) {
-    for (cell_data, mut visibility) in cell_query.iter_mut() {
-        if cell_data.id.hierarchy == hierarchy {
+    for (cell_header, mut visibility) in cell_query.iter_mut() {
+        if cell_header.0.id.hierarchy == hierarchy {
             visibility.visible = show;
         }
     }

@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 
 use point_converter::cell::CellId;
 
-use crate::plugins::streaming::cell::CellData;
+use crate::plugins::streaming::cell::CellHeader;
 use crate::plugins::wgpu::{Device, Queue};
 
 #[repr(C)]
@@ -146,13 +146,13 @@ pub(super) fn update_loaded_cells_buffer(
     queue: Res<Queue>,
     device: Res<Device>,
     mut loaded_cells_bind_group_data: ResMut<LoadedCellsBindGroupData>,
-    cell_query: Query<&CellData>,
+    cell_query: Query<&CellHeader>,
 ) {
     let mut loaded_cells = cell_query
         .iter()
-        .map(|cell_data| Cell {
-            hierarchy: cell_data.id.hierarchy,
-            index: cell_data.id.index,
+        .map(|cell_header| Cell {
+            hierarchy: cell_header.0.id.hierarchy,
+            index: cell_header.0.id.index,
         })
         .collect_vec();
 

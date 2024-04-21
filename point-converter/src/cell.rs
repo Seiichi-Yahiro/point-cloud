@@ -196,7 +196,7 @@ pub enum CellAddPointError {
     GridPositionOccupied,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Header {
     /// A unique id over all cells
     pub id: CellId,

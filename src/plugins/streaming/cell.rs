@@ -8,7 +8,6 @@ use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
-use glam::Vec3;
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
@@ -117,14 +116,6 @@ enum StreamState {
     Paused,
 }
 
-#[derive(Component)]
-pub struct CellData {
-    pub id: CellId,
-    pub pos: Vec3,
-    pub size: f32,
-    pub number_of_points: u32,
-}
-
 #[derive(Default, Resource)]
 struct LoadedCells(FxHashMap<CellId, Entity>);
 
@@ -186,7 +177,7 @@ impl Ord for CellToLoad {
 
 fn cleanup_cells(
     mut commands: Commands,
-    cell_query: Query<Entity, With<CellData>>,
+    cell_query: Query<Entity, With<CellHeader>>,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
@@ -201,9 +192,12 @@ fn cleanup_cells(
     }
 }
 
+#[derive(Component)]
+pub struct CellHeader(pub point_converter::cell::Header);
+
 #[derive(Bundle)]
 struct CellBundle {
-    cell_data: CellData,
+    header: CellHeader,
     vertex_buffer: VertexBuffer<Point>,
     bind_group_data: CellBindGroupData,
     visibility: Visibility,
@@ -211,11 +205,12 @@ struct CellBundle {
 
 impl CellBundle {
     fn new(
-        id: CellId,
         cell: Cell,
         device: &wgpu::Device,
         cell_bind_group_layout: &CellBindGroupLayout,
     ) -> Self {
+        let header = cell.header().clone();
+
         let points = cell
             .points()
             .iter()
@@ -226,18 +221,10 @@ impl CellBundle {
             .collect_vec();
 
         let vertex_buffer = VertexBuffer::new(device, &points);
-        let bind_group_data = CellBindGroupData::new(device, cell_bind_group_layout, id);
-
-        let header = cell.header();
-        let cell_data = CellData {
-            id,
-            pos: header.pos,
-            size: header.size,
-            number_of_points: header.number_of_points,
-        };
+        let bind_group_data = CellBindGroupData::new(device, cell_bind_group_layout, header.id);
 
         Self {
-            cell_data,
+            header: CellHeader(header),
             vertex_buffer,
             bind_group_data,
             visibility: Visibility::new(true),
@@ -266,9 +253,7 @@ fn receive_cell(
                     Ok(Some(cell)) => {
                         log::debug!("Loaded cell: {:?}", id);
 
-                        let cell_bundle =
-                            CellBundle::new(id, cell, &device, &cell_bind_group_layout);
-
+                        let cell_bundle = CellBundle::new(cell, &device, &cell_bind_group_layout);
                         let entity = commands.spawn(cell_bundle).id();
 
                         loaded_cells.0.insert(id, entity);
@@ -424,8 +409,11 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     }
 
     {
-        let mut query = world.query::<&CellData>();
-        let sum = query.iter(world).map(|it| it.number_of_points).sum::<u32>();
+        let mut query = world.query::<&CellHeader>();
+        let sum = query
+            .iter(world)
+            .map(|header| header.0.number_of_points)
+            .sum::<u32>();
         ui.label(format!("Loaded points: {}", sum.separate_with_commas()));
         ui.label(format!(
             "Loaded size: {}",
