@@ -11,16 +11,16 @@ use point_converter::convert_from_paths;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None, verbatim_doc_comment)]
 struct Args {
-    /// Output directory of the converted format
-    /// Will be created if it doesn't exist
+    /// Output directory of the converted format.
+    /// Will be created if it doesn't exist.
     #[arg(short, long, value_name = "DIR")]
     output: Option<PathBuf>,
 
-    /// Directories with input files to convert
+    /// Directories with input files to convert.
     #[arg(short, long, value_name = "DIRS")]
     directories: Vec<PathBuf>,
 
-    /// Input files with the points to convert
+    /// Input files with the points to convert.
     #[arg(short, long, value_name = "FILES")]
     files: Vec<PathBuf>,
 }
