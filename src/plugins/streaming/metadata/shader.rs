@@ -15,6 +15,7 @@ pub struct MetadataBindGroupData {
     pub layout: wgpu::BindGroupLayout,
     pub group: wgpu::BindGroup,
     buffer: wgpu::Buffer,
+    buffer_capacity: usize,
 }
 
 impl MetadataBindGroupData {
@@ -33,9 +34,25 @@ impl MetadataBindGroupData {
             }],
         });
 
+        let buffer_capacity = 0;
+        let (buffer, group) = Self::create_buffer_and_bind_group(buffer_capacity, device, &layout);
+
+        Self {
+            layout,
+            group,
+            buffer,
+            buffer_capacity,
+        }
+    }
+
+    fn create_buffer_and_bind_group(
+        capacity: usize,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("metadata-buffer"),
-            size: (std::mem::size_of::<u32>() + std::mem::size_of::<Hierarchy>() * 20)
+            size: (std::mem::size_of::<u32>() + std::mem::size_of::<Hierarchy>() * capacity)
                 as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -43,24 +60,28 @@ impl MetadataBindGroupData {
 
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("metadata-bind-group"),
-            layout: &layout,
+            layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: buffer.as_entire_binding(),
             }],
         });
 
-        Self {
-            layout,
-            group,
-            buffer,
-        }
+        (buffer, group)
+    }
+
+    fn set_capacity(&mut self, capacity: usize, device: &wgpu::Device) {
+        let (buffer, group) = Self::create_buffer_and_bind_group(capacity, device, &self.layout);
+        self.buffer = buffer;
+        self.group = group;
+        self.buffer_capacity = capacity;
     }
 }
 
-pub(super) fn write_buffer(
+pub(super) fn update_metadata_buffer(
+    device: Res<Device>,
     queue: Res<Queue>,
-    metadata_bind_group_data: Res<MetadataBindGroupData>,
+    mut metadata_bind_group_data: ResMut<MetadataBindGroupData>,
     active_metadata: ActiveMetadataRes,
 ) {
     let metadata = &active_metadata.metadata;
@@ -74,17 +95,23 @@ pub(super) fn write_buffer(
         })
         .collect_vec();
 
+    if hierarchies.len() != metadata_bind_group_data.buffer_capacity {
+        metadata_bind_group_data.set_capacity(hierarchies.len(), &device);
+    }
+
     queue.write_buffer(
         &metadata_bind_group_data.buffer,
         0,
         bytemuck::bytes_of(&(hierarchies.len() as u32)),
     );
 
-    queue.write_buffer(
-        &metadata_bind_group_data.buffer,
-        std::mem::size_of::<u32>() as wgpu::BufferAddress,
-        bytemuck::cast_slice(&hierarchies),
-    );
+    if !hierarchies.is_empty() {
+        queue.write_buffer(
+            &metadata_bind_group_data.buffer,
+            std::mem::size_of::<u32>() as wgpu::BufferAddress,
+            bytemuck::cast_slice(&hierarchies),
+        );
+    }
 }
 
 pub(super) fn setup(world: &mut World) {

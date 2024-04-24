@@ -52,7 +52,7 @@ impl Plugin for MetadataPlugin {
             )
             .add_systems(
                 OnEnter(MetadataState::Loaded),
-                (look_at_bounding_box, shader::write_buffer),
+                (look_at_bounding_box, shader::update_metadata_buffer),
             );
     }
 }
