@@ -1,14 +1,15 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use bevy_app::{AppExit, PluginsState};
 use bevy_app::prelude::*;
+use bevy_app::{AppExit, PluginsState};
 use bevy_ecs::event::ManualEventReader;
 use bevy_ecs::prelude::*;
 use cfg_if::cfg_if;
+use web_time::{Duration, Instant};
 use winit::dpi::PhysicalSize;
 use winit::event::Event;
-use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 use winit::window::WindowBuilder;
 
 type UserEvent = ();
@@ -96,6 +97,9 @@ impl Plugin for WinitPlugin {
                 .remove_non_send_resource::<EventLoop<UserEvent>>()
                 .unwrap();
 
+            event_loop.set_control_flow(ControlFlow::Poll);
+            let mut last_frame_time = Instant::now();
+
             let mut app_exit_event_reader = ManualEventReader::<AppExit>::default();
 
             let event_handler =
@@ -111,33 +115,41 @@ impl Plugin for WinitPlugin {
                         return;
                     }
 
-                    if let Event::WindowEvent {
-                        event: window_event,
-                        ..
-                    } = event
-                    {
-                        app.world.send_event(WindowEvent(window_event.clone()));
+                    match event {
+                        Event::AboutToWait => {
+                            let current_time = Instant::now();
+                            let delta_time = current_time - last_frame_time;
 
-                        match window_event {
-                            winit::event::WindowEvent::RedrawRequested => {
+                            if delta_time >= Duration::from_secs_f64(1.0 / 60.0) {
+                                last_frame_time = current_time;
                                 app.update();
-                                app.world.get_resource::<Window>().unwrap().request_redraw();
                             }
-                            winit::event::WindowEvent::Resized(new_size) => {
-                                app.world
-                                    .send_event(WindowResized {
-                                        physical_size: PhysicalSize::new(
-                                            new_size.width.max(1),
-                                            new_size.height.max(1),
-                                        ),
-                                    })
-                                    .unwrap();
-                            }
-                            winit::event::WindowEvent::CloseRequested => {
-                                target.exit();
-                            }
-                            _ => {}
                         }
+                        Event::WindowEvent {
+                            event: window_event,
+                            ..
+                        } => {
+                            app.world.send_event(WindowEvent(window_event.clone()));
+
+                            match window_event {
+                                winit::event::WindowEvent::RedrawRequested => {}
+                                winit::event::WindowEvent::Resized(new_size) => {
+                                    app.world
+                                        .send_event(WindowResized {
+                                            physical_size: PhysicalSize::new(
+                                                new_size.width.max(1),
+                                                new_size.height.max(1),
+                                            ),
+                                        })
+                                        .unwrap();
+                                }
+                                winit::event::WindowEvent::CloseRequested => {
+                                    target.exit();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
                     }
                 };
 
