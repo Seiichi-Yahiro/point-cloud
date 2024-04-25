@@ -156,7 +156,13 @@ pub(super) fn update_loaded_cells_buffer(
         })
         .collect_vec();
 
-    loaded_cells.sort_unstable_by_key(|cell| cell.hierarchy);
+    loaded_cells.sort_unstable_by(|a, b| {
+        a.hierarchy
+            .cmp(&b.hierarchy)
+            .then(a.index.x.cmp(&b.index.x))
+            .then(a.index.y.cmp(&b.index.y))
+            .then(a.index.z.cmp(&b.index.z))
+    });
 
     if loaded_cells.len() > loaded_cells_bind_group_data.buffer_capacity {
         loaded_cells_bind_group_data.set_capacity(loaded_cells.len() + 50, &device);

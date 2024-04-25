@@ -90,21 +90,56 @@ fn get_splat_radius(position: vec3<f32>) -> f32 {
     var hierarchy = metadata.hierarchies[current_hierarchy];
     var index = cell_index(position, hierarchy.cell_size);  
     
-    for (var i = 0u; i < loaded_cells.len; i += 1u) {
-        let cell = loaded_cells.cells[i];
+    var target_cell: Cell;
+    target_cell.hierarchy = current_hierarchy;
+    target_cell.x = index.x;
+    target_cell.y = index.y;
+    target_cell.z = index.z;
+    
+    while binary_search(target_cell) {
+        spacing = hierarchy.spacing;
+                    
+        current_hierarchy = current_hierarchy + 1;
+        hierarchy = metadata.hierarchies[current_hierarchy];
+        index = cell_index(position, hierarchy.cell_size);
         
-        if cell.hierarchy == current_hierarchy && all(index == vec3(cell.x, cell.y, cell.z)) {
-            spacing = hierarchy.spacing;
-            
-            current_hierarchy = current_hierarchy + 1;
-            hierarchy = metadata.hierarchies[current_hierarchy];
-            index = cell_index(position, hierarchy.cell_size);
-        } else if cell.hierarchy > current_hierarchy {
-            return spacing;
-        }
+        target_cell.hierarchy = current_hierarchy;
+        target_cell.x = index.x;
+        target_cell.y = index.y;
+        target_cell.z = index.z;
     }
    
    return spacing;
+}
+
+fn binary_search(target_cell: Cell) -> bool {
+    var low = 0;
+    var high = i32(loaded_cells.len) - 1;
+
+    while (low <= high) {
+        var mid = (low + high) / 2;
+        var mid_cell = loaded_cells.cells[mid];
+
+        if (
+            mid_cell.hierarchy == target_cell.hierarchy 
+            && mid_cell.x == target_cell.x 
+            && mid_cell.y == target_cell.y 
+            && mid_cell.z == target_cell.z
+        ) {
+            return true;
+        } else if (
+            mid_cell.hierarchy < target_cell.hierarchy
+            || (mid_cell.hierarchy == target_cell.hierarchy && mid_cell.x < target_cell.x) 
+            || (mid_cell.hierarchy == target_cell.hierarchy && mid_cell.x == target_cell.x && mid_cell.y < target_cell.y) 
+            || (mid_cell.hierarchy == target_cell.hierarchy && mid_cell.x == target_cell.x && mid_cell.y == target_cell.y && mid_cell.z < target_cell.z)
+        ) {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    return false;
 }
 
 @vertex
