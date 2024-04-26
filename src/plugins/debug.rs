@@ -313,7 +313,7 @@ fn toggle_streaming_frustums(
     if show {
         for streaming_frustums in add_query.iter() {
             let streaming_frustum = &streaming_frustums[hierarchy as usize];
-            let far_corners = &streaming_frustum.far_corners;
+            let far_corners = &streaming_frustum.far;
 
             let lines = line_strip(
                 [255, 0, if hierarchy % 2 == 0 { 180 } else { 90 }, 255],

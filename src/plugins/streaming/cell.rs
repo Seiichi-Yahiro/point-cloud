@@ -8,13 +8,14 @@ use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
 use egui::ahash::{HashMapExt, HashSetExt};
 use flume::{Receiver, Sender, TryRecvError};
+use glam::IVec3;
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
 
 use point_converter::cell::{Cell, CellId};
 
-use crate::plugins::camera::frustum::{Aabb, Frustum};
+use crate::plugins::camera::frustum::Aabb;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::render::point::Point;
@@ -284,21 +285,20 @@ fn receive_cell(
 
 fn update_cells(
     mut commands: Commands,
-    camera_query: Query<
-        (&frustums::StreamingFrustums, &Transform, &Frustum),
-        (With<Camera>, Changed<frustums::StreamingFrustums>),
-    >,
-    active_metadata: ActiveMetadataRes,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
+    camera_query: Query<
+        (&frustums::StreamingFrustums, &Transform),
+        (With<Camera>, Changed<frustums::StreamingFrustums>),
+    >,
+    active_metadata: ActiveMetadataRes,
 ) {
     let metadata = &active_metadata.metadata;
 
-    for (streaming_frustums, transform, frustum) in camera_query.iter() {
+    for (streaming_frustums, transform) in camera_query.iter() {
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
         let mut new_should_load = BTreeSet::new();
-        let mut frustum_planes = frustum.planes.clone();
 
         for (hierarchy, streaming_frustum) in streaming_frustums.iter().enumerate() {
             let hierarchy = hierarchy as u32;
@@ -306,16 +306,24 @@ fn update_cells(
             let cell_size = metadata.cell_size(hierarchy);
             let half_cell_size = cell_size / 2.0;
 
-            frustum_planes.far = streaming_frustum.far_plane;
+            let mut frustum_aabb = streaming_frustum.aabb();
+            frustum_aabb.clamp(metadata.bounding_box.min, metadata.bounding_box.max);
+            let min_cell_index = metadata.cell_index(frustum_aabb.min, cell_size);
+            let max_cell_index = metadata.cell_index(frustum_aabb.max, cell_size);
 
-            let ids = streaming_frustum
-                .cell_indices()
-                .map(move |index| CellId { index, hierarchy })
+            let new_visible_cells = (min_cell_index.x..=max_cell_index.x)
+                .cartesian_product(min_cell_index.y..=max_cell_index.y)
+                .cartesian_product(min_cell_index.z..=max_cell_index.z)
+                .map(|((x, y), z)| IVec3::new(x, y, z))
+                .map(|cell_index| CellId {
+                    hierarchy,
+                    index: cell_index,
+                })
                 .filter(|cell_id| missing_cells.0.get(cell_id).is_none())
                 .filter(|cell_id| {
                     let cell_pos = metadata.cell_pos(cell_id.index, cell_size);
                     let cell_aabb = Aabb::new(cell_pos - half_cell_size, cell_pos + half_cell_size);
-                    !frustum_planes.cull_aabb(cell_aabb)
+                    !streaming_frustum.cull_aabb(cell_aabb)
                 })
                 .map(|cell_id| {
                     let cell_pos = metadata.cell_pos(cell_id.index, cell_size);
@@ -327,8 +335,7 @@ fn update_cells(
                     }
                 });
 
-            // copy or insert cells that need to be loaded
-            for cell_to_load in ids {
+            for cell_to_load in new_visible_cells {
                 if let Some(entity) = loaded_cells.0.remove(&cell_to_load.id) {
                     new_loaded.insert(cell_to_load.id, entity);
                 } else if loading_cells.should_load.remove(&cell_to_load)

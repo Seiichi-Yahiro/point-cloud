@@ -1,10 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use bevy_ecs::prelude::*;
-use glam::{IVec3, Vec4};
-use itertools::Itertools;
 
-use crate::plugins::camera::frustum::{Aabb, Corners, Frustum};
+use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
 use crate::plugins::streaming::metadata::ActiveMetadataRes;
@@ -24,29 +22,11 @@ impl Default for StreamingFrustumsScale {
     }
 }
 
-#[derive(Debug)]
-pub struct StreamingFrustum {
-    pub far_corners: Corners,
-    pub far_plane: Vec4,
-    pub aabb: Aabb,
-    pub min_cell_index: IVec3,
-    pub max_cell_index: IVec3,
-}
-
-impl StreamingFrustum {
-    pub fn cell_indices(&self) -> impl Iterator<Item = IVec3> {
-        (self.min_cell_index.x..=self.max_cell_index.x)
-            .cartesian_product(self.min_cell_index.y..=self.max_cell_index.y)
-            .cartesian_product(self.min_cell_index.z..=self.max_cell_index.z)
-            .map(|((x, y), z)| IVec3::new(x, y, z))
-    }
-}
-
 #[derive(Debug, Component)]
-pub struct StreamingFrustums(Vec<StreamingFrustum>);
+pub struct StreamingFrustums(Vec<Frustum>);
 
 impl Deref for StreamingFrustums {
-    type Target = Vec<StreamingFrustum>;
+    type Target = Vec<Frustum>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -89,46 +69,26 @@ pub fn update_streaming_frustums(
 
         let mut new_projection = projection.clone();
 
-        let near_aabb = {
-            let mut near_corners_iter = frustum.near.iter().copied();
-            let first_corner = near_corners_iter.next().unwrap();
-            near_corners_iter.fold(Aabb::new(first_corner, first_corner), |mut acc, corner| {
-                acc.extend(corner);
-                acc
-            })
-        };
-
         let forward = transform.forward();
         let far_normal = frustum.planes.far.truncate();
 
         **streaming_frustums = (0..metadata.hierarchies)
             .map(|hierarchy| {
                 let cell_size = metadata.cell_size(hierarchy);
+
                 let far_distance = (cell_size * streaming_frustums_scale.0).min(projection.far);
                 let center_on_far_plane = transform.translation + far_distance * forward;
 
                 new_projection.far = far_distance;
                 let far_corners = Frustum::far_corners(transform, &new_projection);
 
-                let mut aabb = far_corners
-                    .iter()
-                    .copied()
-                    .fold(near_aabb, |mut acc, corner| {
-                        acc.extend(corner);
-                        acc
-                    });
+                let mut new_frustum_planes = frustum.planes.clone();
+                new_frustum_planes.far = far_normal.extend(center_on_far_plane.dot(far_normal));
 
-                aabb.clamp(metadata.bounding_box.min, metadata.bounding_box.max);
-
-                let min_cell_index = metadata.cell_index(aabb.min, cell_size);
-                let max_cell_index = metadata.cell_index(aabb.max, cell_size);
-
-                StreamingFrustum {
-                    far_corners,
-                    far_plane: far_normal.extend(center_on_far_plane.dot(far_normal)),
-                    aabb,
-                    min_cell_index,
-                    max_cell_index,
+                Frustum {
+                    near: frustum.near.clone(),
+                    far: far_corners,
+                    planes: new_frustum_planes,
                 }
             })
             .collect();

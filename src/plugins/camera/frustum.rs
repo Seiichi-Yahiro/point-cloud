@@ -206,6 +206,16 @@ impl Frustum {
     pub fn cull_aabb(&self, aabb: Aabb) -> bool {
         self.planes.cull_aabb(aabb)
     }
+
+    pub fn aabb(&self) -> Aabb {
+        let mut corners_iter = self.near.iter().chain(self.far.iter()).copied();
+        let first_corner = corners_iter.next().unwrap();
+
+        corners_iter.fold(Aabb::new(first_corner, first_corner), |mut acc, corner| {
+            acc.extend(corner);
+            acc
+        })
+    }
 }
 
 // TODO move to different module
