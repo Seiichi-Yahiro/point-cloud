@@ -76,7 +76,8 @@ pub fn update_streaming_frustums(
             .map(|hierarchy| {
                 let cell_size = metadata.cell_size(hierarchy);
 
-                let far_distance = (cell_size * streaming_frustums_scale.0).min(projection.far);
+                let far_distance =
+                    projection.near + (cell_size * streaming_frustums_scale.0).min(projection.far);
                 let center_on_far_plane = transform.translation + far_distance * forward;
 
                 new_projection.far = far_distance;
