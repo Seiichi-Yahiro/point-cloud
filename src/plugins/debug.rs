@@ -11,6 +11,7 @@ use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::frustums::StreamingFrustums;
 use crate::plugins::streaming::cell::CellHeader;
 use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
+use crate::plugins::streaming::CellStreamingSet;
 use crate::plugins::wgpu::Device;
 
 pub struct DebugPlugin;
@@ -53,6 +54,7 @@ impl Plugin for DebugPlugin {
         app.add_systems(
             Update,
             (add_grid_for_new_cells, set_visibility_for_new_cells)
+                .after(CellStreamingSet)
                 .run_if(in_state(MetadataState::Loaded)),
         )
         .add_systems(

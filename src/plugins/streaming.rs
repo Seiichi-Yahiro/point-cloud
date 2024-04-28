@@ -29,6 +29,15 @@ pub enum Source {
     None,
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, SystemSet)]
+pub struct CellStreamingSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
+enum StreamState {
+    Enabled,
+    Paused,
+}
+
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     egui::CollapsingHeader::new("Metadata")
         .default_open(true)
