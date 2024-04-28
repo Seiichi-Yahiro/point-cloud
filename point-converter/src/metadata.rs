@@ -63,7 +63,7 @@ impl Metadata {
     }
 
     pub fn cell_spacing(&self, cell_size: f32) -> f32 {
-        (cell_size / self.sub_grid_dimension as f32) / 1.5
+        (cell_size / self.sub_grid_dimension as f32) * 0.5 * 3.0f32.sqrt()
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> serde_json::Result<()> {
