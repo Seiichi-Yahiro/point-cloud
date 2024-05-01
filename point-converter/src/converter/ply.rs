@@ -1,4 +1,5 @@
 use crate::{converter, log_progress, point};
+use ply_rs::ply::Encoding;
 
 pub fn convert_ply(
     path: &std::path::Path,
@@ -17,11 +18,31 @@ pub fn convert_ply(
 
         let file_instant = std::time::Instant::now();
 
-        let points = parser.read_payload_for_element(&mut buf_reader, element, &header)?;
+        let mut read_point: Box<dyn FnMut() -> Result<point::Point, std::io::Error>> = match header
+            .encoding
+        {
+            Encoding::Ascii => {
+                let points = parser.read_payload_for_element(&mut buf_reader, element, &header)?;
 
-        log::info!("Finished loading points will start converting now.");
+                log::info!("Finished loading points will start converting now.");
 
-        for (i, point) in points.into_iter().enumerate() {
+                for (i, point) in points.into_iter().enumerate() {
+                    converter.add_point(point);
+                    log_progress(i, number_of_points);
+                }
+
+                return Ok(());
+            }
+            Encoding::BinaryBigEndian => {
+                Box::new(|| parser.read_big_endian_element(&mut buf_reader, element))
+            }
+            Encoding::BinaryLittleEndian => {
+                Box::new(|| parser.read_little_endian_element(&mut buf_reader, element))
+            }
+        };
+
+        for i in 0..number_of_points {
+            let point = read_point()?;
             converter.add_point(point);
             log_progress(i, number_of_points);
         }
