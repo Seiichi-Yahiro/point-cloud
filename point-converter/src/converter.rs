@@ -48,9 +48,9 @@ impl Converter {
     }
 
     fn add_point_in_hierarchy(&mut self, point: Point, hierarchy: u32) {
-        let cell_size = self.metadata.cell_size(hierarchy);
-        let cell_index = self.metadata.cell_index(point.pos, cell_size);
-        let cell_pos = self.metadata.cell_pos(cell_index, cell_size);
+        let cell_size = self.metadata.config.cell_size(hierarchy);
+        let cell_index = self.metadata.config.cell_index(point.pos, cell_size);
+        let cell_pos = self.metadata.config.cell_pos(cell_index, cell_size);
 
         let cell_id = CellId {
             hierarchy,
@@ -92,13 +92,13 @@ impl Converter {
             .get_mut(&cell_id)
             .expect("Cell should have been inserted if it didn't exist");
 
-        match cell.add_point(point, &self.metadata) {
+        match cell.add_point(point, &self.metadata.config) {
             Ok(_) => {
                 self.metadata.number_of_points += 1;
                 self.update_bounding_box(point);
             }
             Err(CellAddPointError::OverflowLimitReached) => {
-                let overflow = cell.apply_grid_and_extract_overflow(&self.metadata);
+                let overflow = cell.apply_grid_and_extract_overflow(&self.metadata.config);
 
                 // subtract points or they will be counted twice
                 self.metadata.number_of_points -= overflow.len() as u64;
@@ -127,7 +127,7 @@ impl Converter {
     pub fn load_cell(&self, cell_path: &Path) -> Result<Cell, std::io::Error> {
         std::fs::read(cell_path).and_then(|bytes| {
             let mut cursor = Cursor::new(bytes);
-            Cell::read_from(&mut cursor, self.metadata.sub_grid_dimension)
+            Cell::read_from(&mut cursor, &self.metadata.config)
         })
     }
 
@@ -145,7 +145,9 @@ impl Converter {
                     id,
                     cell_size,
                     cell_pos,
-                    self.metadata.number_of_sub_grid_cells() as usize,
+                    (self.metadata.config.cell_point_limit
+                        + self.metadata.config.cell_point_overflow_limit)
+                        as usize,
                 ),
                 _ => {
                     panic!("{:?}", err);

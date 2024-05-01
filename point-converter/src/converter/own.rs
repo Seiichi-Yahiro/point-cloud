@@ -51,7 +51,7 @@ fn convert_hierarchy(
                     Ok(cell_entry) => {
                         let cell_path = cell_entry.path();
 
-                        match cell::Cell::from_path(&cell_path, metadata.sub_grid_dimension) {
+                        match cell::Cell::from_path(&cell_path, &metadata.config) {
                             Ok(cell) => {
                                 for point in cell.points() {
                                     converter.add_point(*point);

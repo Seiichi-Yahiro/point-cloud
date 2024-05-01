@@ -1,17 +1,14 @@
 use flume::{Receiver, RecvError, Sender};
 
 use point_converter::cell::{Cell, CellId};
+use point_converter::metadata::MetadataConfig;
 
 use crate::plugins::streaming::loader::{no_source_error, LoadError};
 use crate::plugins::streaming::{Directory, Source};
 
 #[derive(Debug)]
 pub enum LoadCellMsg {
-    Cell {
-        id: CellId,
-        sub_grid_dimension: u32,
-        source: Source,
-    },
+    Cell { id: CellId, source: Source },
     Stop,
 }
 
@@ -21,11 +18,19 @@ pub struct LoadedCellMsg {
     pub cell: Result<Option<Cell>, LoadError>,
 }
 
-pub fn spawn_cell_loader(receiver: Receiver<LoadCellMsg>, sender: Sender<LoadedCellMsg>) {
+pub fn spawn_cell_loader(
+    config: MetadataConfig,
+    receiver: Receiver<LoadCellMsg>,
+    sender: Sender<LoadedCellMsg>,
+) {
     log::debug!("Spawning cell loader thread");
 
     let future = async move {
-        let loader = Loader { receiver, sender };
+        let loader = Loader {
+            config,
+            receiver,
+            sender,
+        };
         loader.run().await;
     };
 
@@ -42,22 +47,21 @@ pub fn spawn_cell_loader(receiver: Receiver<LoadCellMsg>, sender: Sender<LoadedC
 }
 
 struct Loader {
+    config: MetadataConfig,
     receiver: Receiver<LoadCellMsg>,
     sender: Sender<LoadedCellMsg>,
 }
 
 impl Loader {
     async fn run(&self) {
+        log::debug!("Cell loader thread started");
+
         loop {
             match self.receiver.recv_async().await {
-                Ok(LoadCellMsg::Cell {
-                    id,
-                    sub_grid_dimension,
-                    source,
-                }) => {
+                Ok(LoadCellMsg::Cell { id, source }) => {
                     let load_result = match source {
                         Source::Directory(dir) => {
-                            match Self::load_from_directory(id, dir, sub_grid_dimension).await {
+                            match Self::load_from_directory(id, dir, &self.config).await {
                                 Ok(cell) => Ok(Some(cell)),
                                 Err(err) => {
                                     #[cfg(not(target_arch = "wasm32"))]
@@ -89,7 +93,7 @@ impl Loader {
                         .unwrap();
                 }
                 Ok(LoadCellMsg::Stop) => {
-                    log::debug!("Stopping cell loader thread");
+                    log::debug!("Received stop signal. Stopping cell loader thread");
                     return;
                 }
                 Err(RecvError::Disconnected) => {
@@ -104,16 +108,16 @@ impl Loader {
     async fn load_from_directory(
         id: CellId,
         dir: Directory,
-        sub_grid_dimension: u32,
+        config: &MetadataConfig,
     ) -> Result<Cell, LoadError> {
-        Cell::from_path(id.path(&dir), sub_grid_dimension)
+        Cell::from_path(id.path(&dir), config)
     }
 
     #[cfg(target_arch = "wasm32")]
     async fn load_from_directory(
         id: CellId,
         dir: Directory,
-        sub_grid_dimension: u32,
+        config: &MetadataConfig,
     ) -> Result<Cell, LoadError> {
         use wasm_bindgen::JsCast;
 
@@ -125,7 +129,7 @@ impl Loader {
         let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
         let mut cursor = std::io::Cursor::new(bytes);
 
-        let cell = Cell::read_from(&mut cursor, sub_grid_dimension)
+        let cell = Cell::read_from(&mut cursor, config)
             .map_err(|err| js_sys::Error::new(&err.to_string()))?;
 
         log::debug!("Loaded cell {:?}", id);

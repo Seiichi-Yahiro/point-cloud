@@ -88,8 +88,8 @@ pub(super) fn update_metadata_buffer(
 
     let hierarchies = (0..metadata.hierarchies)
         .map(|hierarchy| {
-            let cell_size = metadata.cell_size(hierarchy);
-            let spacing = metadata.cell_spacing(cell_size);
+            let cell_size = metadata.config.cell_size(hierarchy);
+            let spacing = metadata.config.cell_spacing(cell_size);
 
             Hierarchy { cell_size, spacing }
         })

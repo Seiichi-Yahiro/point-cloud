@@ -8,7 +8,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rustc_hash::FxHashSet;
 
-use crate::metadata::Metadata;
+use crate::metadata::{Metadata, MetadataConfig};
 use crate::point::Point;
 use crate::Endianess;
 
@@ -69,16 +69,16 @@ impl Cell {
     pub fn add_point(
         &mut self,
         point: Point,
-        metadata: &Metadata,
+        config: &MetadataConfig,
     ) -> Result<(), CellAddPointError> {
         if let Some(grid) = &mut self.grid {
-            if (self.points.len() as u32) >= metadata.cell_point_limit {
+            if (self.points.len() as u32) >= config.cell_point_limit {
                 return Err(CellAddPointError::PointLimitReached);
             }
 
             let sub_grid_index = self
                 .header
-                .sub_grid_index_for_point(point, metadata.sub_grid_dimension);
+                .sub_grid_index_for_point(point, config.sub_grid_dimension);
 
             if grid.insert(sub_grid_index) {
                 self.points.push(point);
@@ -89,7 +89,7 @@ impl Cell {
                 Err(CellAddPointError::GridPositionOccupied)
             }
         } else if (self.points.len() as u32)
-            < metadata.cell_point_limit + metadata.cell_point_overflow_limit
+            < config.cell_point_limit + config.cell_point_overflow_limit
         {
             self.points.push(point);
             self.header.number_of_points += 1;
@@ -100,7 +100,7 @@ impl Cell {
         }
     }
 
-    pub fn apply_grid_and_extract_overflow(&mut self, metadata: &Metadata) -> Vec<Point> {
+    pub fn apply_grid_and_extract_overflow(&mut self, config: &MetadataConfig) -> Vec<Point> {
         let mut grid = FxHashSet::with_capacity_and_hasher(
             self.points.len() / 2,
             BuildHasherDefault::default(),
@@ -113,7 +113,7 @@ impl Cell {
             .partition(|point| {
                 let sub_grid_index = self
                     .header
-                    .sub_grid_index_for_point(*point, metadata.sub_grid_dimension);
+                    .sub_grid_index_for_point(*point, config.sub_grid_dimension);
 
                 grid.insert(sub_grid_index)
             });
@@ -139,7 +139,7 @@ impl Cell {
 
     pub fn read_from(
         reader: &mut dyn Read,
-        sub_grid_dimension: u32,
+        config: &MetadataConfig,
     ) -> Result<Self, std::io::Error> {
         let header = Header::read_from(reader)?;
 
@@ -153,7 +153,8 @@ impl Cell {
 
             for _ in 0..header.number_of_points {
                 let point = Point::read_from(reader)?;
-                let sub_grid_index = header.sub_grid_index_for_point(point, sub_grid_dimension);
+                let sub_grid_index =
+                    header.sub_grid_index_for_point(point, config.sub_grid_dimension);
 
                 grid.insert(sub_grid_index);
                 points.push(point);
@@ -178,11 +179,11 @@ impl Cell {
 
     pub fn from_path<T: AsRef<Path>>(
         path: T,
-        sub_grid_dimension: u32,
+        config: &MetadataConfig,
     ) -> Result<Self, std::io::Error> {
         let file = std::fs::File::open(path)?;
         let mut buf_reader = std::io::BufReader::new(file);
-        Self::read_from(&mut buf_reader, sub_grid_dimension)
+        Self::read_from(&mut buf_reader, config)
     }
 }
 

@@ -20,22 +20,24 @@ pub struct Metadata {
     /// Number of existing hierarchy levels.
     pub hierarchies: u32,
 
-    /// Number of points a cell can hold.
-    pub cell_point_limit: u32,
-
-    /// Number of points a cell can hold additionally before creating new cells in the next lower
-    /// hierarchy level.
-    pub cell_point_overflow_limit: u32,
-
-    /// [sub_grid_dimension]^3 is the number of points a cell can hold.
-    /// Doesn't count for minimum sized cells of the lowest hierarchy level.
-    pub sub_grid_dimension: u32,
-
-    /// Size of the largest cell of the largest hierarchy level.
-    pub max_cell_size: f32,
-
     /// A 3D Bounding box of the point cloud with min max values for every dimension.
     pub bounding_box: BoundingBox,
+
+    /// Configuration
+    pub config: MetadataConfig,
+}
+
+impl Default for Metadata {
+    fn default() -> Self {
+        Self {
+            version: "1.0".to_string(),
+            name: "Unknown".to_string(),
+            number_of_points: 0,
+            hierarchies: 0,
+            bounding_box: BoundingBox::default(),
+            config: MetadataConfig::default(),
+        }
+    }
 }
 
 impl Metadata {
@@ -44,26 +46,6 @@ impl Metadata {
 
     pub fn hierarchy_string(hierarchy: u32) -> String {
         format!("h_{}", hierarchy)
-    }
-
-    pub fn number_of_sub_grid_cells(&self) -> u32 {
-        self.sub_grid_dimension.pow(3)
-    }
-
-    pub fn cell_size(&self, hierarchy: u32) -> f32 {
-        self.max_cell_size / 2u32.pow(hierarchy) as f32
-    }
-
-    pub fn cell_index(&self, pos: Vec3, cell_size: f32) -> IVec3 {
-        (pos / cell_size).floor().as_ivec3()
-    }
-
-    pub fn cell_pos(&self, cell_index: IVec3, cell_size: f32) -> Vec3 {
-        cell_index.as_vec3() * cell_size + cell_size / 2.0
-    }
-
-    pub fn cell_spacing(&self, cell_size: f32) -> f32 {
-        (cell_size / self.sub_grid_dimension as f32) * 0.5 * 3.0f32.sqrt()
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> serde_json::Result<()> {
@@ -82,19 +64,49 @@ impl Metadata {
     }
 }
 
-impl Default for Metadata {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetadataConfig {
+    /// Number of points a cell can hold.
+    pub cell_point_limit: u32,
+
+    /// Number of points a cell can hold additionally before creating new cells in the next lower
+    /// hierarchy level.
+    pub cell_point_overflow_limit: u32,
+
+    /// [sub_grid_dimension]^3 is the number of points a cell can hold.
+    /// Doesn't count for minimum sized cells of the lowest hierarchy level.
+    pub sub_grid_dimension: u32,
+
+    /// Size of the largest cell of the largest hierarchy level.
+    pub max_cell_size: f32,
+}
+
+impl Default for MetadataConfig {
     fn default() -> Self {
         Self {
-            version: "1.0".to_string(),
-            name: "Unknown".to_string(),
-            number_of_points: 0,
-            max_cell_size: 1000.0,
-            hierarchies: 0,
-            bounding_box: BoundingBox::default(),
             sub_grid_dimension: 128,
-            cell_point_overflow_limit: 50_000,
+            cell_point_overflow_limit: 50_000, // smaller values give better quality but more small files
             cell_point_limit: 100_000,
+            max_cell_size: 1000.0,
         }
+    }
+}
+
+impl MetadataConfig {
+    pub fn cell_size(&self, hierarchy: u32) -> f32 {
+        self.max_cell_size / 2u32.pow(hierarchy) as f32
+    }
+
+    pub fn cell_index(&self, pos: Vec3, cell_size: f32) -> IVec3 {
+        (pos / cell_size).floor().as_ivec3()
+    }
+
+    pub fn cell_pos(&self, cell_index: IVec3, cell_size: f32) -> Vec3 {
+        cell_index.as_vec3() * cell_size + cell_size / 2.0
+    }
+
+    pub fn cell_spacing(&self, cell_size: f32) -> f32 {
+        (cell_size / self.sub_grid_dimension as f32) * 0.5 * 3.0f32.sqrt()
     }
 }
 
@@ -105,7 +117,6 @@ pub struct BoundingBox {
     pub max: Vec3,
 }
 
-// TODO Bounding box can be wrong as it always contains the origin
 impl BoundingBox {
     pub fn new(min: Vec3, max: Vec3) -> Self {
         Self { min, max }
