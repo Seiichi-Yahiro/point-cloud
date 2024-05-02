@@ -53,7 +53,7 @@ fn convert_hierarchy(
 
                         match cell::Cell::from_path(&cell_path, &metadata.config) {
                             Ok(cell) => {
-                                for point in cell.points() {
+                                for point in cell.all_points() {
                                     converter.add_point(*point);
                                 }
                             }

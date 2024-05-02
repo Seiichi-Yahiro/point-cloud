@@ -23,7 +23,6 @@ byteorder = "1.5.0"
 caches = "0.2.8"
 rustc-hash = "1.1.0"
 itertools = "0.12.1"
-rand = "0.8.5"
 clap = { version = "4.5.4", features = ["derive"] }
 clap_derive = "4.5.4"
 las = { version = "0.8.3", features = ["laz"] }

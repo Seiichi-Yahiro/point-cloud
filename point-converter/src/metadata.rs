@@ -66,9 +66,6 @@ impl Metadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetadataConfig {
-    /// Number of points a cell can hold.
-    pub cell_point_limit: u32,
-
     /// Number of points a cell can hold additionally before creating new cells in the next lower
     /// hierarchy level.
     pub cell_point_overflow_limit: u32,
@@ -85,8 +82,7 @@ impl Default for MetadataConfig {
     fn default() -> Self {
         Self {
             sub_grid_dimension: 128,
-            cell_point_overflow_limit: 50_000, // smaller values give better quality but more small files
-            cell_point_limit: 100_000,
+            cell_point_overflow_limit: 5_000, // smaller values give better quality but more small files
             max_cell_size: 1000.0,
         }
     }

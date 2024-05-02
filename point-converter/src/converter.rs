@@ -15,7 +15,7 @@ use caches::{Cache, LRUCache, PutResult};
 use glam::Vec3;
 use rustc_hash::FxHasher;
 
-use crate::cell::{Cell, CellAddPointError, CellId};
+use crate::cell::{AddPointOverflowResult, Cell, CellId};
 use crate::metadata::{BoundingBox, Metadata};
 use crate::point::Point;
 
@@ -92,26 +92,34 @@ impl Converter {
             .get_mut(&cell_id)
             .expect("Cell should have been inserted if it didn't exist");
 
-        match cell.add_point(point, &self.metadata.config) {
-            Ok(_) => {
-                self.metadata.number_of_points += 1;
-                self.update_bounding_box(point);
-            }
-            Err(CellAddPointError::OverflowLimitReached) => {
-                let overflow = cell.apply_grid_and_extract_overflow(&self.metadata.config);
+        if cell.add_point(point, &self.metadata.config) {
+            self.metadata.number_of_points += 1;
+            self.update_bounding_box(point);
+        } else {
+            let next_hierarchy = hierarchy + 1;
+            let next_cell_size = self.metadata.config.cell_size(next_hierarchy);
+            let next_cell_index = self.metadata.config.cell_index(point.pos, next_cell_size);
 
-                // subtract points or they will be counted twice
-                self.metadata.number_of_points -= overflow.len() as u64;
-
-                for point in overflow {
-                    self.add_point_in_hierarchy(point, hierarchy + 1);
+            match cell.add_point_in_overflow(next_cell_index, point, &self.metadata.config) {
+                AddPointOverflowResult::Success => {
+                    self.metadata.number_of_points += 1;
+                    self.update_bounding_box(point);
                 }
+                AddPointOverflowResult::Full => {
+                    let overflow = cell.close_overflow(next_cell_index);
 
-                self.add_point_in_hierarchy(point, hierarchy + 1);
-            }
-            Err(CellAddPointError::GridPositionOccupied)
-            | Err(CellAddPointError::PointLimitReached) => {
-                self.add_point_in_hierarchy(point, hierarchy + 1);
+                    // subtract points or they will be counted twice
+                    self.metadata.number_of_points -= overflow.len() as u64;
+
+                    for point in overflow {
+                        self.add_point_in_hierarchy(point, next_hierarchy);
+                    }
+
+                    self.add_point_in_hierarchy(point, next_hierarchy);
+                }
+                AddPointOverflowResult::Closed => {
+                    self.add_point_in_hierarchy(point, next_hierarchy);
+                }
             }
         }
     }
@@ -141,14 +149,7 @@ impl Converter {
         match self.load_cell(cell_path) {
             Ok(cell) => cell,
             Err(err) => match err.kind() {
-                ErrorKind::NotFound => Cell::new(
-                    id,
-                    cell_size,
-                    cell_pos,
-                    (self.metadata.config.cell_point_limit
-                        + self.metadata.config.cell_point_overflow_limit)
-                        as usize,
-                ),
+                ErrorKind::NotFound => Cell::new(id, cell_size, cell_pos, 50_000),
                 _ => {
                     panic!("{:?}", err);
                 }

@@ -275,8 +275,7 @@ impl CellBundle {
         let header = cell.header().clone();
 
         let points = cell
-            .points()
-            .iter()
+            .all_points()
             .map(|it| Point {
                 position: it.pos,
                 color: it.color,
@@ -445,7 +444,7 @@ struct Stats {
 fn count_points(cell_header_query: Query<&CellHeader>, mut stats: ResMut<Stats>) {
     let total_points = cell_header_query
         .iter()
-        .map(|header| header.0.number_of_points as u64)
+        .map(|header| header.0.total_number_of_points as u64)
         .sum();
     stats.loaded_points = total_points;
     stats.loaded_points_byte_size = std::mem::size_of::<Point>() as u64 * total_points;

@@ -4,9 +4,7 @@ use std::path::Path;
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use glam::{IVec3, UVec3, Vec3};
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::metadata::{Metadata, MetadataConfig};
 use crate::point::Point;
@@ -44,7 +42,8 @@ impl CellId {
 pub struct Cell {
     header: Header,
     points: Vec<Point>,
-    grid: Option<FxHashSet<u32>>,
+    points_grid: FxHashSet<u32>,
+    overflow: FxHashMap<IVec3, Option<Vec<Point>>>,
 }
 
 impl Cell {
@@ -54,7 +53,11 @@ impl Cell {
         Self {
             header: Header::new(id, size, pos),
             points: Vec::with_capacity(capacity),
-            grid: None,
+            points_grid: FxHashSet::with_capacity_and_hasher(
+                capacity,
+                BuildHasherDefault::default(),
+            ),
+            overflow: FxHashMap::default(),
         }
     }
 
@@ -66,63 +69,66 @@ impl Cell {
         &self.points
     }
 
-    pub fn add_point(
-        &mut self,
-        point: Point,
-        config: &MetadataConfig,
-    ) -> Result<(), CellAddPointError> {
-        if let Some(grid) = &mut self.grid {
-            if (self.points.len() as u32) >= config.cell_point_limit {
-                return Err(CellAddPointError::PointLimitReached);
-            }
-
-            let sub_grid_index = self
-                .header
-                .sub_grid_index_for_point(point, config.sub_grid_dimension);
-
-            if grid.insert(sub_grid_index) {
-                self.points.push(point);
-                self.header.number_of_points += 1;
-
-                Ok(())
-            } else {
-                Err(CellAddPointError::GridPositionOccupied)
-            }
-        } else if (self.points.len() as u32)
-            < config.cell_point_limit + config.cell_point_overflow_limit
-        {
-            self.points.push(point);
-            self.header.number_of_points += 1;
-
-            Ok(())
-        } else {
-            Err(CellAddPointError::OverflowLimitReached)
-        }
+    pub fn overflow_points(&self) -> impl Iterator<Item = &Point> {
+        self.overflow
+            .values()
+            .filter_map(|sub_cell| sub_cell.as_ref().map(|points| points.iter()))
+            .flatten()
     }
 
-    pub fn apply_grid_and_extract_overflow(&mut self, config: &MetadataConfig) -> Vec<Point> {
-        let mut grid = FxHashSet::with_capacity_and_hasher(
-            self.points.len() / 2,
-            BuildHasherDefault::default(),
-        );
+    pub fn all_points(&self) -> impl Iterator<Item = &Point> {
+        self.points.iter().chain(self.overflow_points())
+    }
 
-        self.points.shuffle(&mut thread_rng());
+    pub fn add_point(&mut self, point: Point, config: &MetadataConfig) -> bool {
+        let sub_grid_index = self
+            .header
+            .sub_grid_index_for_point(point, config.sub_grid_dimension);
 
-        let (points, overflow) = std::mem::take(&mut self.points)
-            .into_iter()
-            .partition(|point| {
-                let sub_grid_index = self
-                    .header
-                    .sub_grid_index_for_point(*point, config.sub_grid_dimension);
+        if self.points_grid.insert(sub_grid_index) {
+            self.points.push(point);
+            self.header.total_number_of_points += 1;
+            self.header.number_of_points += 1;
 
-                grid.insert(sub_grid_index)
-            });
+            return true;
+        }
 
-        self.points = points;
-        self.header.number_of_points -= overflow.len() as u32;
+        false
+    }
 
-        self.grid = Some(grid);
-        self.header.has_grid = true;
+    pub fn add_point_in_overflow(
+        &mut self,
+        next_cell_index: IVec3,
+        point: Point,
+        config: &MetadataConfig,
+    ) -> AddPointOverflowResult {
+        let next_cell = self.overflow.entry(next_cell_index).or_insert_with(|| {
+            Some(Vec::with_capacity(
+                config.cell_point_overflow_limit as usize,
+            ))
+        });
+
+        if let Some(next_cell) = next_cell {
+            return if next_cell.len() < config.cell_point_overflow_limit as usize {
+                next_cell.push(point);
+                self.header.total_number_of_points += 1;
+                self.header.number_of_overflow_points += 1;
+
+                AddPointOverflowResult::Success
+            } else {
+                AddPointOverflowResult::Full
+            };
+        }
+
+        AddPointOverflowResult::Closed
+    }
+
+    pub fn close_overflow(&mut self, next_cell_index: IVec3) -> Vec<Point> {
+        let overflow = self.overflow.get_mut(&next_cell_index).unwrap();
+        let overflow = overflow.take().unwrap();
+
+        self.header.total_number_of_points -= self.overflow.len() as u32;
+        self.header.number_of_overflow_points -= self.overflow.len() as u32;
 
         overflow
     }
@@ -132,6 +138,24 @@ impl Cell {
 
         for point in &self.points {
             point.write_to(writer)?;
+        }
+
+        writer.write_u8(self.overflow.len() as u8)?;
+
+        for (next_cell_index, points) in &self.overflow {
+            writer.write_i32::<Endianess>(next_cell_index.x)?;
+            writer.write_i32::<Endianess>(next_cell_index.y)?;
+            writer.write_i32::<Endianess>(next_cell_index.z)?;
+
+            if let Some(points) = points {
+                writer.write_u32::<Endianess>(points.len() as u32)?;
+
+                for point in points {
+                    point.write_to(writer)?;
+                }
+            } else {
+                writer.write_u32::<Endianess>(0)?;
+            }
         }
 
         Ok(())
@@ -145,35 +169,53 @@ impl Cell {
 
         let mut points = Vec::with_capacity(header.number_of_points as usize);
 
-        let grid = if header.has_grid {
-            let mut grid = FxHashSet::with_capacity_and_hasher(
-                header.number_of_points as usize,
-                BuildHasherDefault::default(),
-            );
+        let mut points_grid = FxHashSet::with_capacity_and_hasher(
+            header.number_of_points as usize,
+            BuildHasherDefault::default(),
+        );
 
-            for _ in 0..header.number_of_points {
-                let point = Point::read_from(reader)?;
-                let sub_grid_index =
-                    header.sub_grid_index_for_point(point, config.sub_grid_dimension);
+        for _ in 0..header.number_of_points {
+            let point = Point::read_from(reader)?;
 
-                grid.insert(sub_grid_index);
-                points.push(point);
+            let sub_grid_index = header.sub_grid_index_for_point(point, config.sub_grid_dimension);
+
+            points_grid.insert(sub_grid_index);
+            points.push(point);
+        }
+
+        let overflow_len = reader.read_u8()? as usize;
+        let mut overflow =
+            FxHashMap::with_capacity_and_hasher(overflow_len, BuildHasherDefault::default());
+
+        for _ in 0..overflow_len {
+            let key = {
+                let x = reader.read_i32::<Endianess>()?;
+                let y = reader.read_i32::<Endianess>()?;
+                let z = reader.read_i32::<Endianess>()?;
+                IVec3::new(x, y, z)
+            };
+
+            let number_of_overflow_points = reader.read_u32::<Endianess>()? as usize;
+
+            if number_of_overflow_points == 0 {
+                overflow.insert(key, None);
+            } else {
+                let mut overflow_points = Vec::with_capacity(number_of_overflow_points);
+
+                for _ in 0..number_of_overflow_points {
+                    let point = Point::read_from(reader)?;
+                    overflow_points.push(point);
+                }
+
+                overflow.insert(key, Some(overflow_points));
             }
-
-            Some(grid)
-        } else {
-            for _ in 0..header.number_of_points {
-                let point = Point::read_from(reader)?;
-                points.push(point);
-            }
-
-            None
-        };
+        }
 
         Ok(Self {
             header,
-            grid,
             points,
+            points_grid,
+            overflow,
         })
     }
 
@@ -187,14 +229,11 @@ impl Cell {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum CellAddPointError {
-    /// The cell is full.
-    PointLimitReached,
-    /// The cell is overflowing and needs to reduce points.
-    OverflowLimitReached,
-    /// The grid cell was already occupied by another point.
-    GridPositionOccupied,
+#[derive(Debug, PartialEq, Eq)]
+pub enum AddPointOverflowResult {
+    Success,
+    Full,
+    Closed,
 }
 
 #[derive(Debug, Clone)]
@@ -203,10 +242,11 @@ pub struct Header {
     pub id: CellId,
 
     /// Number of points in this cell.
+    pub total_number_of_points: u32,
+
     pub number_of_points: u32,
 
-    /// Does a grid exists?
-    pub has_grid: bool,
+    pub number_of_overflow_points: u32,
 
     /// The side length of the cubic cell.
     pub size: f32,
@@ -220,8 +260,9 @@ impl Header {
     pub fn new(id: CellId, size: f32, pos: Vec3) -> Self {
         Self {
             id,
+            total_number_of_points: 0,
             number_of_points: 0,
-            has_grid: false,
+            number_of_overflow_points: 0,
             size,
             pos,
         }
@@ -246,8 +287,10 @@ impl Header {
         writer.write_i32::<Endianess>(self.id.index.y)?;
         writer.write_i32::<Endianess>(self.id.index.z)?;
 
+        writer.write_u32::<Endianess>(self.total_number_of_points)?;
         writer.write_u32::<Endianess>(self.number_of_points)?;
-        writer.write_u8(self.has_grid as u8)?;
+        writer.write_u32::<Endianess>(self.number_of_overflow_points)?;
+
         writer.write_f32::<Endianess>(self.size)?;
 
         writer.write_f32::<Endianess>(self.pos.x)?;
@@ -269,8 +312,10 @@ impl Header {
             }
         };
 
+        let total_number_of_points = reader.read_u32::<Endianess>()?;
         let number_of_points = reader.read_u32::<Endianess>()?;
-        let has_grid = reader.read_u8()? != 0;
+        let number_of_overflow_points = reader.read_u32::<Endianess>()?;
+
         let size = reader.read_f32::<Endianess>()?;
 
         let pos = {
@@ -282,8 +327,9 @@ impl Header {
 
         Ok(Self {
             id,
+            total_number_of_points,
             number_of_points,
-            has_grid,
+            number_of_overflow_points,
             size,
             pos,
         })
