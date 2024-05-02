@@ -185,8 +185,8 @@ pub(super) fn setup(world: &mut World) {
     let device = world.get_resource::<Device>().unwrap();
 
     let cell_bind_group_layout = CellBindGroupLayout::new(device);
-    let visible_cells_bind_group_data = LoadedCellsBindGroupData::new(device);
+    let loaded_cells_bind_group_data = LoadedCellsBindGroupData::new(device);
 
     world.insert_resource(cell_bind_group_layout);
-    world.insert_resource(visible_cells_bind_group_data);
+    world.insert_resource(loaded_cells_bind_group_data);
 }

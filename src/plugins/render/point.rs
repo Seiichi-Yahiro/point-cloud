@@ -59,7 +59,7 @@ fn setup(
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
-    visible_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
+    loaded_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
 ) {
     let shader = device.create_shader_module(wgpu::include_wgsl!("point.wgsl"));
 
@@ -69,7 +69,7 @@ fn setup(
             &view_projection_bind_group_layout,
             &metadata_bind_group_data.layout,
             &cell_bind_group_layout.0,
-            &visible_cells_bind_group_data.layout,
+            &loaded_cells_bind_group_data.layout,
         ],
         push_constant_ranges: &[],
     });
@@ -124,7 +124,7 @@ fn draw(
     camera_query: Query<&Camera>,
     vertex_buffers: Query<(&VertexBuffer<Point>, &CellBindGroupData, &Visibility)>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
-    visible_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
+    loaded_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
 ) {
     global_render_resources
         .encoders
@@ -155,7 +155,7 @@ fn draw(
                 render_pass.set_pipeline(&local_render_resources.pipeline);
                 render_pass.set_bind_group(0, &camera.bind_group, &[]);
                 render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
-                render_pass.set_bind_group(3, &visible_cells_bind_group_data.group, &[]);
+                render_pass.set_bind_group(3, &loaded_cells_bind_group_data.group, &[]);
 
                 for (vertex_buffer, cell_bind_group_data, visibility) in vertex_buffers.iter() {
                     if !visibility.visible {
