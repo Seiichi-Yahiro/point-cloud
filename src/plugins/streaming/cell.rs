@@ -22,7 +22,9 @@ use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::render::point::Point;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::loader::{LoadCellMsg, LoadedCellMsg};
-use crate::plugins::streaming::cell::shader::{CellBindGroupData, CellBindGroupLayout};
+use crate::plugins::streaming::cell::shader::{
+    CellBindGroupData, CellBindGroupLayout, FrustumsSettings,
+};
 use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
@@ -69,7 +71,11 @@ impl Plugin for CellPlugin {
             )
             .add_systems(
                 OnEnter(MetadataState::Loaded),
-                (set_view_distance, start_cell_loader),
+                (
+                    set_view_distance,
+                    start_cell_loader,
+                    shader::set_frustums_settings_max_hierarchy,
+                ),
             )
             .add_systems(OnExit(MetadataState::Loaded), stop_cell_loader)
             .add_systems(OnEnter(MetadataState::Loading), cleanup_cells)
@@ -79,6 +85,8 @@ impl Plugin for CellPlugin {
                     (
                         shader::update_loaded_cells_buffer.run_if(resource_changed::<LoadedCells>),
                         shader::update_frustums_buffer,
+                        shader::update_frustums_settings_buffer
+                            .run_if(resource_changed::<FrustumsSettings>),
                     ),
                     shader::update_cells_bind_group,
                 )

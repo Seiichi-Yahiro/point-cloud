@@ -8,6 +8,7 @@ use point_converter::cell::CellId;
 use crate::plugins::camera::Camera;
 use crate::plugins::streaming::cell::frustums::StreamingFrustums;
 use crate::plugins::streaming::cell::CellHeader;
+use crate::plugins::streaming::metadata::ActiveMetadataRes;
 use crate::plugins::wgpu::{Device, Queue};
 use crate::transform::Transform;
 
@@ -105,6 +106,16 @@ impl CellsBindGroupLayout {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2, // frustums settings
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -121,6 +132,7 @@ impl CellsBindGroup {
         layout: &CellsBindGroupLayout,
         loaded_cells: &LoadedCellsBuffer,
         frustums: &FrustumsBuffer,
+        frustums_settings: &FrustumsSettings,
     ) -> Self {
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("cells-bind-group"),
@@ -133,6 +145,10 @@ impl CellsBindGroup {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: frustums.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: frustums_settings.buffer.as_entire_binding(),
                 },
             ],
         });
@@ -177,6 +193,30 @@ impl FrustumsBuffer {
         });
 
         Self { buffer, capacity }
+    }
+}
+
+#[derive(Resource)]
+pub struct FrustumsSettings {
+    pub size_by_distance: bool,
+    pub max_hierarchy: u32,
+    buffer: wgpu::Buffer,
+}
+
+impl FrustumsSettings {
+    fn new(device: &wgpu::Device) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frustums-settings-buffer"),
+            size: (std::mem::size_of::<u32>() + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            size_by_distance: true,
+            max_hierarchy: 0,
+            buffer,
+        }
     }
 }
 
@@ -247,12 +287,37 @@ pub(super) fn update_frustums_buffer(
     }
 }
 
+pub(super) fn set_frustums_settings_max_hierarchy(
+    active_metadata: ActiveMetadataRes,
+    mut frustums_settings: ResMut<FrustumsSettings>,
+) {
+    frustums_settings.max_hierarchy = active_metadata.metadata.hierarchies - 1;
+}
+
+pub(super) fn update_frustums_settings_buffer(
+    queue: Res<Queue>,
+    frustums_settings: Res<FrustumsSettings>,
+) {
+    queue.write_buffer(
+        &frustums_settings.buffer,
+        0,
+        bytemuck::bytes_of(&(frustums_settings.size_by_distance as u32)),
+    );
+
+    queue.write_buffer(
+        &frustums_settings.buffer,
+        std::mem::size_of::<u32>() as wgpu::BufferAddress,
+        bytemuck::bytes_of(&frustums_settings.max_hierarchy),
+    );
+}
+
 pub(super) fn update_cells_bind_group(
     device: Res<Device>,
     mut cells_bind_group: ResMut<CellsBindGroup>,
     cells_bind_group_layout: Res<CellsBindGroupLayout>,
     loaded_cells_buffer: Res<LoadedCellsBuffer>,
     frustums_buffer: Res<FrustumsBuffer>,
+    frustums_settings: Res<FrustumsSettings>,
 ) {
     if loaded_cells_buffer.is_changed() || frustums_buffer.is_changed() {
         *cells_bind_group = CellsBindGroup::new(
@@ -260,6 +325,7 @@ pub(super) fn update_cells_bind_group(
             &cells_bind_group_layout,
             &loaded_cells_buffer,
             &frustums_buffer,
+            &frustums_settings,
         );
     }
 }
@@ -272,11 +338,13 @@ pub(super) fn setup(world: &mut World) {
     let cells_bind_group_layout = CellsBindGroupLayout::new(device);
     let loaded_cells_buffer = LoadedCellsBuffer::new(0, device);
     let frustums_buffer = FrustumsBuffer::new(1, device);
+    let frustums_settings = FrustumsSettings::new(device);
     let cells_bind_group = CellsBindGroup::new(
         device,
         &cells_bind_group_layout,
         &loaded_cells_buffer,
         &frustums_buffer,
+        &frustums_settings,
     );
 
     world.insert_resource(cell_bind_group_layout);
@@ -284,5 +352,6 @@ pub(super) fn setup(world: &mut World) {
     world.insert_resource(cells_bind_group_layout);
     world.insert_resource(loaded_cells_buffer);
     world.insert_resource(frustums_buffer);
+    world.insert_resource(frustums_settings);
     world.insert_resource(cells_bind_group);
 }
