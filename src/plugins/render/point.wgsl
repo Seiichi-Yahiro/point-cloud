@@ -80,36 +80,34 @@ fn cell_index(position: vec3<f32>, cell_size: f32) -> vec3<i32> {
 }
 
 fn get_splat_radius(position: vec3<f32>) -> f32 {
-    var spacing = metadata.hierarchies[cell.hierarchy].spacing;
-    var current_hierarchy = cell.hierarchy + 1;
-    
-    if current_hierarchy == metadata.number_of_hierarchies {
-        return spacing;
+    let own_hierarchy = search_smallest_hierarchy(position, cell.hierarchy);
+    return metadata.hierarchies[own_hierarchy].spacing;
+}
+
+fn search_smallest_hierarchy(position: vec3<f32>, start_hierarchy: u32) -> u32 {
+    if start_hierarchy >= (metadata.number_of_hierarchies - 1) {
+        return metadata.number_of_hierarchies - 1;
     }
-    
-    var hierarchy = metadata.hierarchies[current_hierarchy];
-    var index = cell_index(position, hierarchy.cell_size);  
-    
+
     var target_cell: Cell;
-    target_cell.hierarchy = current_hierarchy;
-    target_cell.x = index.x;
-    target_cell.y = index.y;
-    target_cell.z = index.z;
-    
-    while binary_search(target_cell) {
-        spacing = hierarchy.spacing;
-                    
-        current_hierarchy = current_hierarchy + 1;
-        hierarchy = metadata.hierarchies[current_hierarchy];
-        index = cell_index(position, hierarchy.cell_size);
-        
-        target_cell.hierarchy = current_hierarchy;
+    target_cell.hierarchy = start_hierarchy;
+
+    loop {
+        target_cell.hierarchy += 1u;
+
+        let cell_size = metadata.hierarchies[target_cell.hierarchy].cell_size;
+        let index = cell_index(position, cell_size);
+
         target_cell.x = index.x;
         target_cell.y = index.y;
         target_cell.z = index.z;
+
+        if (!binary_search(target_cell)) {
+            return target_cell.hierarchy - 1u;
+        }
     }
-   
-   return spacing;
+
+    return start_hierarchy; // unreachable but compiler needs this
 }
 
 fn binary_search(target_cell: Cell) -> bool {
