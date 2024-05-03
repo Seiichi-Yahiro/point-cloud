@@ -75,10 +75,16 @@ impl Plugin for CellPlugin {
             .add_systems(OnEnter(MetadataState::Loading), cleanup_cells)
             .add_systems(
                 PostUpdate,
-                shader::update_loaded_cells_buffer
+                (
+                    (
+                        shader::update_loaded_cells_buffer.run_if(resource_changed::<LoadedCells>),
+                        shader::update_frustums_buffer,
+                    ),
+                    shader::update_cells_bind_group,
+                )
+                    .chain()
                     .run_if(in_state(MetadataState::Loaded))
-                    .run_if(in_state(StreamState::Enabled))
-                    .run_if(resource_changed::<LoadedCells>),
+                    .run_if(in_state(StreamState::Enabled)),
             );
     }
 }

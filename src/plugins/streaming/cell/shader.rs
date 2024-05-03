@@ -1,12 +1,15 @@
 use bevy_ecs::prelude::*;
-use glam::IVec3;
+use glam::{IVec3, Vec3};
 use itertools::Itertools;
 use wgpu::util::DeviceExt;
 
 use point_converter::cell::CellId;
 
+use crate::plugins::camera::Camera;
+use crate::plugins::streaming::cell::frustums::StreamingFrustums;
 use crate::plugins::streaming::cell::CellHeader;
 use crate::plugins::wgpu::{Device, Queue};
+use crate::transform::Transform;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -75,77 +78,112 @@ impl CellBindGroupData {
 }
 
 #[derive(Resource)]
-pub struct LoadedCellsBindGroupData {
-    pub layout: wgpu::BindGroupLayout,
-    pub group: wgpu::BindGroup,
-    buffer: wgpu::Buffer,
-    buffer_capacity: usize,
-}
+pub struct CellsBindGroupLayout(pub wgpu::BindGroupLayout);
 
-impl LoadedCellsBindGroupData {
+impl CellsBindGroupLayout {
     fn new(device: &wgpu::Device) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("visible-cells-bind-group-layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            label: Some("cells-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0, // loaded cells
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1, // frustums
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
 
-        let buffer_capacity = 100;
-        let (buffer, group) = Self::create_buffer_and_bind_group(buffer_capacity, device, &layout);
-
-        Self {
-            layout,
-            group,
-            buffer,
-            buffer_capacity,
-        }
+        Self(layout)
     }
+}
 
-    fn create_buffer_and_bind_group(
-        capacity: usize,
+#[derive(Resource)]
+pub struct CellsBindGroup(pub wgpu::BindGroup);
+
+impl CellsBindGroup {
+    fn new(
         device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
-    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+        layout: &CellsBindGroupLayout,
+        loaded_cells: &LoadedCellsBuffer,
+        frustums: &FrustumsBuffer,
+    ) -> Self {
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cells-bind-group"),
+            layout: &layout.0,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: loaded_cells.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: frustums.buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        Self(group)
+    }
+}
+
+#[derive(Resource)]
+pub struct LoadedCellsBuffer {
+    buffer: wgpu::Buffer,
+    capacity: usize,
+}
+
+impl LoadedCellsBuffer {
+    fn new(capacity: usize, device: &wgpu::Device) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("visible-cells-buffer"),
+            label: Some("loaded-cells-buffer"),
             size: (std::mem::size_of::<u32>() + std::mem::size_of::<Cell>() * capacity)
                 as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("visible-cells-bind-group"),
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
+        Self { buffer, capacity }
+    }
+}
+
+#[derive(Resource)]
+pub struct FrustumsBuffer {
+    buffer: wgpu::Buffer,
+    capacity: usize,
+}
+
+impl FrustumsBuffer {
+    fn new(capacity: usize, device: &wgpu::Device) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frustums-buffer"),
+            size: (std::mem::size_of::<f32>() * capacity) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
-        (buffer, group)
-    }
-
-    fn set_capacity(&mut self, capacity: usize, device: &wgpu::Device) {
-        let (buffer, group) = Self::create_buffer_and_bind_group(capacity, device, &self.layout);
-        self.buffer = buffer;
-        self.group = group;
-        self.buffer_capacity = capacity;
+        Self { buffer, capacity }
     }
 }
 
 pub(super) fn update_loaded_cells_buffer(
     queue: Res<Queue>,
     device: Res<Device>,
-    mut loaded_cells_bind_group_data: ResMut<LoadedCellsBindGroupData>,
+    mut loaded_cells_buffer: ResMut<LoadedCellsBuffer>,
     cell_query: Query<&CellHeader>,
 ) {
     let mut loaded_cells = cell_query
@@ -164,29 +202,87 @@ pub(super) fn update_loaded_cells_buffer(
             .then(a.index.z.cmp(&b.index.z))
     });
 
-    if loaded_cells.len() > loaded_cells_bind_group_data.buffer_capacity {
-        loaded_cells_bind_group_data.set_capacity(loaded_cells.len() + 50, &device);
+    if loaded_cells.len() > loaded_cells_buffer.capacity {
+        *loaded_cells_buffer = LoadedCellsBuffer::new(loaded_cells.len() + 50, &device);
     }
 
     queue.write_buffer(
-        &loaded_cells_bind_group_data.buffer,
+        &loaded_cells_buffer.buffer,
         0,
         bytemuck::bytes_of(&(loaded_cells.len() as u32)),
     );
 
     queue.write_buffer(
-        &loaded_cells_bind_group_data.buffer,
+        &loaded_cells_buffer.buffer,
         std::mem::size_of::<u32>() as wgpu::BufferAddress,
         bytemuck::cast_slice(&loaded_cells),
     );
+}
+
+pub(super) fn update_frustums_buffer(
+    device: Res<Device>,
+    queue: Res<Queue>,
+    mut frustums_buffer: ResMut<FrustumsBuffer>,
+    frustums_query: Query<
+        (&StreamingFrustums, &Transform),
+        (With<Camera>, Changed<StreamingFrustums>),
+    >,
+) {
+    for (frustums, camera_transform) in frustums_query.iter() {
+        let far_distances = frustums
+            .iter()
+            .map(|frustum| frustum.far.iter().sum::<Vec3>() / frustum.far.iter().len() as f32)
+            .map(|far_center| camera_transform.translation.distance(far_center))
+            .collect_vec();
+
+        if frustums_buffer.capacity != far_distances.len() {
+            *frustums_buffer = FrustumsBuffer::new(far_distances.len(), &device);
+        }
+
+        queue.write_buffer(
+            &frustums_buffer.buffer,
+            0,
+            bytemuck::cast_slice(&far_distances),
+        );
+    }
+}
+
+pub(super) fn update_cells_bind_group(
+    device: Res<Device>,
+    mut cells_bind_group: ResMut<CellsBindGroup>,
+    cells_bind_group_layout: Res<CellsBindGroupLayout>,
+    loaded_cells_buffer: Res<LoadedCellsBuffer>,
+    frustums_buffer: Res<FrustumsBuffer>,
+) {
+    if loaded_cells_buffer.is_changed() || frustums_buffer.is_changed() {
+        *cells_bind_group = CellsBindGroup::new(
+            &device,
+            &cells_bind_group_layout,
+            &loaded_cells_buffer,
+            &frustums_buffer,
+        );
+    }
 }
 
 pub(super) fn setup(world: &mut World) {
     let device = world.get_resource::<Device>().unwrap();
 
     let cell_bind_group_layout = CellBindGroupLayout::new(device);
-    let loaded_cells_bind_group_data = LoadedCellsBindGroupData::new(device);
+
+    let cells_bind_group_layout = CellsBindGroupLayout::new(device);
+    let loaded_cells_buffer = LoadedCellsBuffer::new(0, device);
+    let frustums_buffer = FrustumsBuffer::new(1, device);
+    let cells_bind_group = CellsBindGroup::new(
+        device,
+        &cells_bind_group_layout,
+        &loaded_cells_buffer,
+        &frustums_buffer,
+    );
 
     world.insert_resource(cell_bind_group_layout);
-    world.insert_resource(loaded_cells_bind_group_data);
+
+    world.insert_resource(cells_bind_group_layout);
+    world.insert_resource(loaded_cells_buffer);
+    world.insert_resource(frustums_buffer);
+    world.insert_resource(cells_bind_group);
 }

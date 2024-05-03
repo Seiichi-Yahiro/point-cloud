@@ -5,7 +5,7 @@ use glam::Vec3;
 use crate::plugins::camera::{Camera, ViewBindGroupLayout, Visibility};
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::streaming::cell::shader::{
-    CellBindGroupData, CellBindGroupLayout, LoadedCellsBindGroupData,
+    CellBindGroupData, CellBindGroupLayout, CellsBindGroup, CellsBindGroupLayout,
 };
 use crate::plugins::streaming::metadata::shader::MetadataBindGroupData;
 use crate::plugins::wgpu::{
@@ -59,7 +59,7 @@ fn setup(
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
-    loaded_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
+    cells_bind_group_layout: Res<CellsBindGroupLayout>,
 ) {
     let shader = device.create_shader_module(wgpu::include_wgsl!("point.wgsl"));
 
@@ -69,7 +69,7 @@ fn setup(
             &view_projection_bind_group_layout,
             &metadata_bind_group_data.layout,
             &cell_bind_group_layout.0,
-            &loaded_cells_bind_group_data.layout,
+            &cells_bind_group_layout.0,
         ],
         push_constant_ranges: &[],
     });
@@ -124,7 +124,7 @@ fn draw(
     camera_query: Query<&Camera>,
     vertex_buffers: Query<(&VertexBuffer<Point>, &CellBindGroupData, &Visibility)>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
-    loaded_cells_bind_group_data: Res<LoadedCellsBindGroupData>,
+    cells_bind_group_data: Res<CellsBindGroup>,
 ) {
     global_render_resources
         .encoders
@@ -155,7 +155,7 @@ fn draw(
                 render_pass.set_pipeline(&local_render_resources.pipeline);
                 render_pass.set_bind_group(0, &camera.bind_group, &[]);
                 render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
-                render_pass.set_bind_group(3, &loaded_cells_bind_group_data.group, &[]);
+                render_pass.set_bind_group(3, &cells_bind_group_data.0, &[]);
 
                 for (vertex_buffer, cell_bind_group_data, visibility) in vertex_buffers.iter() {
                     if !visibility.visible {

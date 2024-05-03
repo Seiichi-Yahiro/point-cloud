@@ -2,6 +2,7 @@ struct VPUniform {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
     view_proj: mat4x4<f32>,
+    cam_pos: vec3<f32>
 }
 
 // View Matrix
@@ -47,6 +48,9 @@ struct LoadedCells {
 @group(3) @binding(0)
 var<storage, read> loaded_cells: LoadedCells;
 
+@group(3) @binding(1)
+var<storage, read> frustums_far_distances: array<f32>;
+
 struct InstanceInput {
     @location(0) position: vec3<f32>,
     @location(1) color: vec4<f32>
@@ -81,6 +85,15 @@ fn cell_index(position: vec3<f32>, cell_size: f32) -> vec3<i32> {
 
 fn get_splat_radius(position: vec3<f32>) -> f32 {
     let own_hierarchy = search_smallest_hierarchy(position, cell.hierarchy);
+    
+    let distance_to_camera = distance(vp.cam_pos, position);
+    
+    for (var i = metadata.number_of_hierarchies - 1; i > own_hierarchy; i--) {
+        if (distance_to_camera < frustums_far_distances[i]) {
+            return metadata.hierarchies[i].spacing;
+        }
+    }
+    
     return metadata.hierarchies[own_hierarchy].spacing;
 }
 

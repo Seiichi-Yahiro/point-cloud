@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use glam::{UVec2, Vec3};
+use glam::{Mat4, UVec2, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 
 use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
@@ -110,6 +110,7 @@ impl Visibility {
 fn setup(
     mut commands: Commands,
     device: Res<Device>,
+    queue: Res<Queue>,
     config: Res<SurfaceConfig>,
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
 ) {
@@ -123,11 +124,27 @@ fn setup(
         let projection_mat = projection.compute_matrix();
         let view_projection_mat = projection_mat * view_mat;
 
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view-projection-uniform"),
-            contents: bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
+            size: (std::mem::size_of::<Mat4>() * 3 + std::mem::size_of::<Vec4>())
+                as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        })
+            mapped_at_creation: false,
+        });
+
+        queue.write_buffer(
+            &buffer,
+            0,
+            bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
+        );
+
+        queue.write_buffer(
+            &buffer,
+            (std::mem::size_of::<Mat4>() * 3) as wgpu::BufferAddress,
+            bytemuck::bytes_of(&transform.translation),
+        );
+
+        buffer
     };
 
     let viewport_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -206,6 +223,12 @@ fn write_view_projection_uniform(
             &camera.view_projection,
             0,
             bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
+        );
+
+        queue.write_buffer(
+            &camera.view_projection,
+            (std::mem::size_of::<Mat4>() * 3) as wgpu::BufferAddress,
+            bytemuck::bytes_of(&transform.translation),
         );
     }
 }

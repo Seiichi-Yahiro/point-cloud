@@ -2,6 +2,7 @@ struct VPUniform {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
     view_proj: mat4x4<f32>,
+    cam_pos: vec3<f32>
 }
 
 @group(0) @binding(0)
