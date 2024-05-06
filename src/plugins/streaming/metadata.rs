@@ -289,13 +289,7 @@ fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
         world.insert_non_send_resource(load_receiver);
 
         wasm_bindgen_futures::spawn_local(async move {
-            use wasm_bindgen::JsCast;
-
-            if let Ok(dir) = crate::web::chooseDir().await {
-                let dir = dir
-                    .dyn_into::<web_sys::FileSystemDirectoryHandle>()
-                    .unwrap();
-
+            if let Ok(dir) = crate::web::WebDir::choose().await {
                 load_sender
                     .send(MetadataSelection::Load(Source::Directory(dir)))
                     .unwrap();

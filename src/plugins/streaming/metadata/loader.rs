@@ -53,13 +53,9 @@ async fn load_from_directory(dir: &Directory) -> Result<Metadata, LoadError> {
 
 #[cfg(target_arch = "wasm32")]
 async fn load_from_directory(dir: &Directory) -> Result<Metadata, LoadError> {
-    use wasm_bindgen::JsCast;
-
     let file_name = format!("{}.{}", Metadata::FILE_NAME, Metadata::EXTENSION);
-    let buffer = crate::web::readBytes(dir, &file_name).await?;
-    let array_buffer = buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap();
 
-    let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
+    let bytes = dir.get_file_handle(&file_name).await?.read_bytes().await?;
     let mut cursor = std::io::Cursor::new(bytes);
 
     let metadata =

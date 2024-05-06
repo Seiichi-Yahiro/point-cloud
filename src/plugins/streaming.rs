@@ -20,7 +20,7 @@ impl Plugin for StreamingPlugin {
 pub type Directory = std::path::PathBuf;
 
 #[cfg(target_arch = "wasm32")]
-pub type Directory = web_sys::FileSystemDirectoryHandle;
+pub type Directory = crate::web::WebDir;
 
 #[derive(Debug, Clone)]
 pub enum Source {

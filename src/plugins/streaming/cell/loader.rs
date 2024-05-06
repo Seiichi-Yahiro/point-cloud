@@ -119,14 +119,16 @@ impl Loader {
         dir: Directory,
         config: &MetadataConfig,
     ) -> Result<Cell, LoadError> {
-        use wasm_bindgen::JsCast;
-
         let [hierarchy_dir, file_name] = id.path();
 
-        let buffer = crate::web::readCell(&dir, &hierarchy_dir, &file_name).await?;
-        let array_buffer = buffer.dyn_into::<js_sys::ArrayBuffer>().unwrap();
+        let bytes = dir
+            .get_dir_handle(&hierarchy_dir)
+            .await?
+            .get_file_handle(&file_name)
+            .await?
+            .read_bytes()
+            .await?;
 
-        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
         let mut cursor = std::io::Cursor::new(bytes);
 
         let cell = Cell::read_from(&mut cursor, config)
