@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -34,7 +35,7 @@ pub struct Cell {
     header: Header,
     points: Vec<Point>,
     points_grid: FxHashSet<u32>,
-    overflow: FxHashMap<IVec3, Option<Vec<Point>>>,
+    pub(crate) overflow: FxHashMap<IVec3, Option<Vec<Point>>>,
 }
 
 impl Cell {
@@ -87,41 +88,63 @@ impl Cell {
         false
     }
 
-    pub fn add_point_in_overflow(
-        &mut self,
-        next_cell_index: IVec3,
-        point: Point,
-        config: &MetadataConfig,
-    ) -> AddPointOverflowResult {
-        let next_cell = self.overflow.entry(next_cell_index).or_insert_with(|| {
-            Some(Vec::with_capacity(
-                config.cell_point_overflow_limit as usize,
-            ))
-        });
+    pub fn add_points(&mut self, points: Vec<Point>, config: &MetadataConfig) -> Vec<Point> {
+        let mut overflow_points = Vec::with_capacity(points.capacity());
 
-        if let Some(next_cell) = next_cell {
-            return if next_cell.len() < config.cell_point_overflow_limit as usize {
-                next_cell.push(point);
-                self.header.total_number_of_points += 1;
-                self.header.number_of_overflow_points += 1;
-
-                AddPointOverflowResult::Success
-            } else {
-                AddPointOverflowResult::Full
-            };
+        for point in points {
+            if !self.add_point(point, config) {
+                overflow_points.push(point);
+            }
         }
 
-        AddPointOverflowResult::Closed
+        overflow_points
     }
 
-    pub fn close_overflow(&mut self, next_cell_index: IVec3) -> Vec<Point> {
-        let overflow = self.overflow.get_mut(&next_cell_index).unwrap();
-        let overflow = overflow.take().unwrap();
+    pub fn add_points_in_overflow(
+        &mut self,
+        overflow_points: FxHashMap<IVec3, Vec<Point>>,
+        config: &MetadataConfig,
+    ) -> FxHashMap<IVec3, Vec<Point>> {
+        let mut remaining_overflow_points = FxHashMap::default();
 
-        self.header.total_number_of_points -= self.overflow.len() as u32;
-        self.header.number_of_overflow_points -= self.overflow.len() as u32;
+        for (cell_index, mut points) in overflow_points {
+            match self.overflow.entry(cell_index) {
+                Entry::Vacant(entry) => {
+                    if points.len() <= config.cell_point_overflow_limit as usize {
+                        self.header.total_number_of_points += points.len() as u32;
+                        self.header.number_of_overflow_points += points.len() as u32;
+                        entry.insert(Some(points));
+                    } else {
+                        remaining_overflow_points.insert(cell_index, points);
+                        entry.insert(None);
+                    }
+                }
+                Entry::Occupied(mut entry) => match entry.get_mut() {
+                    None => {
+                        remaining_overflow_points.insert(cell_index, points);
+                    }
+                    Some(cell_points) => {
+                        let cell_points_len = cell_points.len() as u32;
+                        let points_len = points.len() as u32;
 
-        overflow
+                        cell_points.append(&mut points);
+
+                        if cell_points.len() < config.cell_point_overflow_limit as usize {
+                            self.header.total_number_of_points += points_len;
+                            self.header.number_of_overflow_points += points_len;
+                        } else {
+                            self.header.total_number_of_points -= cell_points_len;
+                            self.header.number_of_overflow_points -= cell_points_len;
+
+                            let points = entry.insert(None).unwrap();
+                            remaining_overflow_points.insert(cell_index, points);
+                        }
+                    }
+                },
+            }
+        }
+
+        remaining_overflow_points
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
@@ -218,13 +241,6 @@ impl Cell {
         let mut buf_reader = std::io::BufReader::new(file);
         Self::read_from(&mut buf_reader, config)
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum AddPointOverflowResult {
-    Success,
-    Full,
-    Closed,
 }
 
 #[derive(Debug, Clone)]

@@ -12,6 +12,8 @@ pub fn convert_las(
 
     let file_instant = std::time::Instant::now();
 
+    let mut point_batch = Vec::with_capacity(10_000);
+
     for (i, wrapped_point) in reader.points().enumerate() {
         let las_point = wrapped_point?;
         let color = las_point.color.unwrap_or_default();
@@ -21,9 +23,17 @@ pub fn convert_las(
             color: [color.red as u8, color.green as u8, color.blue as u8, 255],
         };
 
-        converter.add_point(point);
+        if point_batch.len() < 10_000 {
+            point_batch.push(point);
+        } else {
+            let points = std::mem::replace(&mut point_batch, Vec::with_capacity(10_000));
+            converter.add_points_batch(points);
+        }
+
         log_progress(i, number_of_points as usize);
     }
+
+    converter.add_points_batch(point_batch);
 
     log::info!(
         "Finished file after {} ms",

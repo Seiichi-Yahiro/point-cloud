@@ -1,23 +1,64 @@
+use std::collections::hash_map::Entry;
 use std::fs::{create_dir, create_dir_all, File};
 use std::hash::BuildHasherDefault;
 use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use caches::{Cache, LRUCache, PutResult};
-use glam::Vec3;
-use rustc_hash::FxHasher;
+use glam::IVec3;
+use rustc_hash::{FxHashMap, FxHasher};
 
 pub use las::convert_las;
 pub use own::convert_own;
 pub use ply::convert_ply;
 
-use crate::cell::{AddPointOverflowResult, Cell, CellId};
-use crate::metadata::{BoundingBox, Metadata};
+use crate::cell::{Cell, CellId};
+use crate::metadata::{Metadata, MetadataConfig};
 use crate::point::Point;
 
 mod las;
 mod own;
 mod ply;
+
+fn group_points(
+    points: Vec<Point>,
+    hierarchy: u32,
+    config: &MetadataConfig,
+) -> FxHashMap<IVec3, Vec<Point>> {
+    let cell_size = config.cell_size(hierarchy);
+
+    let mut map = FxHashMap::<IVec3, Vec<Point>>::default();
+
+    for point in points {
+        let cell_index = config.cell_index(point.pos, cell_size);
+        map.entry(cell_index).or_default().push(point);
+    }
+
+    map
+}
+
+fn merge_point_maps(left: &mut FxHashMap<IVec3, Vec<Point>>, right: FxHashMap<IVec3, Vec<Point>>) {
+    for (cell_index, mut points) in right {
+        match left.entry(cell_index) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().append(&mut points);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(points);
+            }
+        }
+    }
+}
+
+fn add_points_to_cell(
+    config: &MetadataConfig,
+    points: Vec<Point>,
+    cell: &mut Cell,
+) -> FxHashMap<IVec3, Vec<Point>> {
+    let overflow_points = cell.add_points(points, config);
+    let overflow_points = group_points(overflow_points, cell.header().id.hierarchy + 1, config);
+    cell.add_points_in_overflow(overflow_points, config)
+}
 
 pub struct Converter {
     metadata: Metadata,
@@ -43,29 +84,47 @@ impl Converter {
         }
     }
 
-    pub fn add_point(&mut self, point: Point) {
-        self.add_point_in_hierarchy(point, 0);
+    pub fn add_points_batch(&mut self, points: Vec<Point>) {
+        let grouped_points = group_points(points, 0, &self.metadata.config);
+        self.add_points_in_hierarchy(0, &self.metadata.config.clone(), grouped_points);
     }
 
-    fn add_point_in_hierarchy(&mut self, point: Point, hierarchy: u32) {
-        let cell_size = self.metadata.config.cell_size(hierarchy);
-        let cell_index = self.metadata.config.cell_index(point.pos, cell_size);
-        let cell_pos = self.metadata.config.cell_pos(cell_index, cell_size);
+    fn add_points_in_hierarchy(
+        &mut self,
+        hierarchy: u32,
+        config: &MetadataConfig,
+        grouped_points: FxHashMap<IVec3, Vec<Point>>,
+    ) {
+        self.create_hierarchy_folder(hierarchy);
 
-        let cell_id = CellId {
-            hierarchy,
-            index: cell_index,
-        };
+        let mut next_hierarchy_points = FxHashMap::default();
 
+        for (cell_index, points) in grouped_points {
+            let cell_id = CellId {
+                hierarchy,
+                index: cell_index,
+            };
+
+            let cell = self.get_cell_mut(cell_id);
+            let remaining_points = add_points_to_cell(config, points, cell);
+
+            merge_point_maps(&mut next_hierarchy_points, remaining_points);
+        }
+
+        if !next_hierarchy_points.is_empty() {
+            self.add_points_in_hierarchy(hierarchy + 1, config, next_hierarchy_points);
+        }
+    }
+
+    fn create_hierarchy_folder(&mut self, hierarchy: u32) {
         if self.metadata.hierarchies <= hierarchy {
             self.metadata.hierarchies += 1;
 
-            if let Err(err) = create_dir(
-                self.working_directory
-                    .join(cell_id.path())
-                    .parent()
-                    .unwrap(),
-            ) {
+            let path = self
+                .working_directory
+                .join(Metadata::hierarchy_string(hierarchy));
+
+            if let Err(err) = create_dir(path) {
                 match err.kind() {
                     ErrorKind::AlreadyExists => {}
                     _ => {
@@ -74,14 +133,12 @@ impl Converter {
                 }
             }
         }
+    }
 
+    fn get_cell_mut(&mut self, cell_id: CellId) -> &mut Cell {
         if !self.cell_cache.contains(&cell_id) {
-            let cell = self.load_or_create_cell(
-                &self.working_directory.join(cell_id.path()),
-                cell_id,
-                cell_size,
-                cell_pos,
-            );
+            let cell =
+                self.load_or_create_cell(&self.working_directory.join(cell_id.path()), cell_id);
 
             if let PutResult::Evicted {
                 key: old_cell_id,
@@ -93,69 +150,27 @@ impl Converter {
             }
         }
 
-        let cell = self
-            .cell_cache
+        self.cell_cache
             .get_mut(&cell_id)
-            .expect("Cell should have been inserted if it didn't exist");
-
-        if cell.add_point(point, &self.metadata.config) {
-            self.metadata.number_of_points += 1;
-            self.update_bounding_box(point);
-        } else {
-            let next_hierarchy = hierarchy + 1;
-            let next_cell_size = self.metadata.config.cell_size(next_hierarchy);
-            let next_cell_index = self.metadata.config.cell_index(point.pos, next_cell_size);
-
-            match cell.add_point_in_overflow(next_cell_index, point, &self.metadata.config) {
-                AddPointOverflowResult::Success => {
-                    self.metadata.number_of_points += 1;
-                    self.update_bounding_box(point);
-                }
-                AddPointOverflowResult::Full => {
-                    let overflow = cell.close_overflow(next_cell_index);
-
-                    // subtract points or they will be counted twice
-                    self.metadata.number_of_points -= overflow.len() as u64;
-
-                    for point in overflow {
-                        self.add_point_in_hierarchy(point, next_hierarchy);
-                    }
-
-                    self.add_point_in_hierarchy(point, next_hierarchy);
-                }
-                AddPointOverflowResult::Closed => {
-                    self.add_point_in_hierarchy(point, next_hierarchy);
-                }
-            }
-        }
+            .expect("Cell should have been inserted if it didn't exist")
     }
 
-    fn update_bounding_box(&mut self, point: Point) {
-        if self.metadata.number_of_points == 1 {
-            self.metadata.bounding_box = BoundingBox::new(point.pos, point.pos);
-        } else {
-            self.metadata.bounding_box.extend(point);
-        }
-    }
-
-    pub fn load_cell(&self, cell_path: &Path) -> Result<Cell, std::io::Error> {
+    fn load_cell(&self, cell_path: &Path) -> Result<Cell, std::io::Error> {
         std::fs::read(cell_path).and_then(|bytes| {
             let mut cursor = Cursor::new(bytes);
             Cell::read_from(&mut cursor, &self.metadata.config)
         })
     }
 
-    fn load_or_create_cell(
-        &self,
-        cell_path: &Path,
-        id: CellId,
-        cell_size: f32,
-        cell_pos: Vec3,
-    ) -> Cell {
+    fn load_or_create_cell(&self, cell_path: &Path, id: CellId) -> Cell {
         match self.load_cell(cell_path) {
             Ok(cell) => cell,
             Err(err) => match err.kind() {
-                ErrorKind::NotFound => Cell::new(id, cell_size, cell_pos, 50_000),
+                ErrorKind::NotFound => {
+                    let cell_size = self.metadata.config.cell_size(id.hierarchy);
+                    let cell_pos = self.metadata.config.cell_pos(id.index, cell_size);
+                    Cell::new(id, cell_size, cell_pos, 50_000)
+                }
                 _ => {
                     panic!("{:?}", err);
                 }

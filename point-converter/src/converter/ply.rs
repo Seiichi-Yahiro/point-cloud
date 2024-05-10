@@ -27,7 +27,7 @@ pub fn convert_ply(
                 log::info!("Finished loading points will start converting now.");
 
                 for (i, point) in points.into_iter().enumerate() {
-                    converter.add_point(point);
+                    // TODO converter.add_point(point);
                     log_progress(i, number_of_points);
                 }
 
@@ -43,7 +43,7 @@ pub fn convert_ply(
 
         for i in 0..number_of_points {
             let point = read_point()?;
-            converter.add_point(point);
+            //TODO converter.add_point(point);
             log_progress(i, number_of_points);
         }
 
