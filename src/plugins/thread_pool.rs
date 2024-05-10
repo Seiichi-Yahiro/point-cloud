@@ -1,5 +1,7 @@
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -90,8 +92,25 @@ impl Worker {
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
+#[derive(Debug, Clone)]
+pub struct ThreadPool(Arc<InnerThreadPool>);
+
+impl ThreadPool {
+    pub fn new(size: usize) -> Self {
+        Self(Arc::new(InnerThreadPool::new(size)))
+    }
+}
+
+impl Deref for ThreadPool {
+    type Target = Arc<InnerThreadPool>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug)]
-pub struct ThreadPool {
+pub struct InnerThreadPool {
     workers: Vec<Worker>,
     sender: Sender<Message>,
 }
@@ -102,8 +121,8 @@ pub type ThreadPoolRes<'w> = Res<'w, ThreadPool>;
 #[cfg(target_arch = "wasm32")]
 pub type ThreadPoolRes<'w> = NonSend<'w, ThreadPool>;
 
-impl ThreadPool {
-    fn new(size: usize) -> ThreadPool {
+impl InnerThreadPool {
+    fn new(size: usize) -> Self {
         assert!(size > 0);
 
         let (sender, receiver) = flume::unbounded();
@@ -145,7 +164,7 @@ impl ThreadPool {
     }
 }
 
-impl Drop for ThreadPool {
+impl Drop for InnerThreadPool {
     fn drop(&mut self) {
         for _ in &self.workers {
             self.sender.send(Message::Terminate).unwrap();
