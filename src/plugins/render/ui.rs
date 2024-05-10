@@ -94,10 +94,16 @@ fn ui(world: &mut World) {
             |ui| {
                 crate::plugins::fps::draw_ui(ui, world);
 
-                egui::CollapsingHeader::new("Streaming")
+                egui::CollapsingHeader::new("Metadata")
                     .default_open(true)
                     .show(ui, |ui| {
-                        crate::plugins::streaming::draw_ui(ui, world);
+                        crate::plugins::metadata::draw_ui(ui, world);
+                    });
+
+                egui::CollapsingHeader::new("Cells")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        crate::plugins::cell::draw_ui(ui, world);
                     });
 
                 ui.collapsing("Camera", |ui| {

@@ -1,11 +1,3 @@
-mod las;
-mod own;
-mod ply;
-
-pub use las::convert_las;
-pub use own::convert_own;
-pub use ply::convert_ply;
-
 use std::fs::{create_dir, create_dir_all, File};
 use std::hash::BuildHasherDefault;
 use std::io::{BufWriter, Cursor, ErrorKind, Write};
@@ -15,9 +7,17 @@ use caches::{Cache, LRUCache, PutResult};
 use glam::Vec3;
 use rustc_hash::FxHasher;
 
+pub use las::convert_las;
+pub use own::convert_own;
+pub use ply::convert_ply;
+
 use crate::cell::{AddPointOverflowResult, Cell, CellId};
 use crate::metadata::{BoundingBox, Metadata};
 use crate::point::Point;
+
+mod las;
+mod own;
+mod ply;
 
 pub struct Converter {
     metadata: Metadata,
@@ -60,7 +60,12 @@ impl Converter {
         if self.metadata.hierarchies <= hierarchy {
             self.metadata.hierarchies += 1;
 
-            if let Err(err) = create_dir(cell_id.path(&self.working_directory).parent().unwrap()) {
+            if let Err(err) = create_dir(
+                self.working_directory
+                    .join(cell_id.path())
+                    .parent()
+                    .unwrap(),
+            ) {
                 match err.kind() {
                     ErrorKind::AlreadyExists => {}
                     _ => {
@@ -72,7 +77,7 @@ impl Converter {
 
         if !self.cell_cache.contains(&cell_id) {
             let cell = self.load_or_create_cell(
-                &cell_id.path(&self.working_directory),
+                &self.working_directory.join(cell_id.path()),
                 cell_id,
                 cell_size,
                 cell_pos,
@@ -83,7 +88,8 @@ impl Converter {
                 value: old_cell,
             } = self.cell_cache.put(cell_id, cell)
             {
-                Self::save_cell(&old_cell_id.path(&self.working_directory), &old_cell).unwrap();
+                Self::save_cell(&self.working_directory.join(old_cell_id.path()), &old_cell)
+                    .unwrap();
             }
         }
 
@@ -168,7 +174,7 @@ impl Converter {
 
     pub fn save_cache(&self) -> Result<(), std::io::Error> {
         for (cell_id, cell) in &self.cell_cache {
-            Self::save_cell(&cell_id.path(&self.working_directory), cell)?;
+            Self::save_cell(&self.working_directory.join(cell_id.path()), cell)?;
         }
 
         Ok(())

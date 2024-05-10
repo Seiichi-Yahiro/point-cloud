@@ -1,12 +1,13 @@
 use std::ops::{Deref, DerefMut};
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemState;
 
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
-use crate::plugins::streaming::cell::shader::FrustumsSettings;
-use crate::plugins::streaming::metadata::{ActiveMetadata, ActiveMetadataRes};
+use crate::plugins::cell::shader::FrustumsSettings;
+use crate::plugins::metadata::ActiveMetadata;
 use crate::transform::Transform;
 
 #[derive(Resource)]
@@ -49,7 +50,7 @@ pub fn add_streaming_frustums(mut commands: Commands, camera_query: Query<Entity
 }
 
 pub fn update_streaming_frustums(
-    active_metadata: ActiveMetadataRes,
+    active_metadata: ActiveMetadata,
     mut camera_query: Query<
         (
             &Transform,
@@ -61,7 +62,7 @@ pub fn update_streaming_frustums(
     >,
     streaming_frustums_scale: Res<StreamingFrustumsScale>,
 ) {
-    let metadata = &active_metadata.metadata;
+    let metadata = &active_metadata.get().unwrap();
 
     for (transform, projection, frustum, mut streaming_frustums) in camera_query.iter_mut() {
         if !(frustum.is_changed() || streaming_frustums_scale.is_changed()) {
@@ -117,21 +118,8 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     }
 
     {
-        #[cfg(not(target_arch = "wasm32"))]
-        let hierarchies = world
-            .get_resource::<ActiveMetadata>()
-            .unwrap()
-            .metadata
-            .hierarchies;
-
-        #[cfg(target_arch = "wasm32")]
-        let hierarchies = world
-            .get_non_send_resource::<ActiveMetadata>()
-            .unwrap()
-            .metadata
-            .hierarchies;
-
-        let mut frustums_settings = world.get_resource_mut::<FrustumsSettings>().unwrap();
+        let mut params = SystemState::<(ActiveMetadata, ResMut<FrustumsSettings>)>::new(world);
+        let (active_metadata, mut frustums_settings) = params.get_mut(world);
 
         let mut size_by_distance = frustums_settings.size_by_distance;
         if ui
@@ -140,6 +128,10 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         {
             frustums_settings.size_by_distance = size_by_distance;
         }
+
+        let hierarchies = active_metadata
+            .get()
+            .map_or(1, |metadata| metadata.hierarchies);
 
         let mut max_hierarchy = frustums_settings.max_hierarchy;
         let slider = egui::Slider::new(&mut max_hierarchy, 0..=hierarchies - 1);

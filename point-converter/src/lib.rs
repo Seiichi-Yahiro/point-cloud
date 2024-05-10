@@ -1,12 +1,10 @@
 pub(crate) use byteorder::LittleEndian as Endianess;
 
 pub mod cell;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod converter;
 pub mod metadata;
 pub mod point;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf], output: O) {
     let metadata = load_metadata(output.as_ref());
     let mut converter = converter::Converter::new(metadata, output.as_ref());
@@ -51,7 +49,6 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
     match std::fs::read(
         output
@@ -69,7 +66,6 @@ fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn log_progress(i: usize, number_of_points: usize) {
     if i % (number_of_points as f32 * 0.05) as usize == 0 {
         log::info!("{}/{}", i, number_of_points);

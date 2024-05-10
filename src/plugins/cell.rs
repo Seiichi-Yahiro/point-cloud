@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::hash::BuildHasherDefault;
+use std::io::Read;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
 use egui::ahash::{HashMapExt, HashSetExt};
-use flume::{Receiver, Sender, TryRecvError, TrySendError};
 use glam::IVec3;
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
@@ -16,41 +16,69 @@ use thousands::Separable;
 use point_converter::cell::{Cell, CellId};
 use point_converter::metadata::MetadataConfig;
 
+use crate::plugins::asset::source::{LoadError, Source};
+use crate::plugins::asset::{
+    Asset, AssetHandle, AssetManagerRes, AssetPlugin, LoadAssetMsg, LoadedAssetEvent,
+};
 use crate::plugins::camera::frustum::Aabb;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
+use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};
+use crate::plugins::metadata::{ActiveMetadata, MetadataState};
 use crate::plugins::render::point::Point;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::cell::loader::{LoadCellMsg, LoadedCellMsg};
-use crate::plugins::streaming::cell::shader::{
-    CellBindGroupData, CellBindGroupLayout, FrustumsSettings,
-};
-use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
 use crate::plugins::wgpu::Device;
 use crate::transform::Transform;
 
 pub mod frustums;
-mod loader;
 pub mod shader;
+
+impl Asset for Cell {
+    type Id = CellId;
+
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, LoadError> {
+        // TODO config
+        let result = Cell::read_from(reader, &MetadataConfig::default());
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            return result.map_err(|err| {
+                let js_error = js_sys::Error::new(&err.to_string());
+                js_error.set_cause(&wasm_bindgen::JsValue::from(err.kind().to_string()));
+                js_error
+            });
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        return result;
+    }
+}
 
 pub struct CellPlugin;
 
 impl Plugin for CellPlugin {
     fn build(&self, app: &mut App) {
-        #[cfg(not(target_arch = "wasm32"))]
-        app.world.insert_resource(CellLoader::default());
-
-        #[cfg(target_arch = "wasm32")]
-        app.world.insert_non_send_resource(CellLoader::default());
-
         shader::setup(&mut app.world);
 
-        app.insert_state(StreamState::Enabled)
+        app.add_plugins(AssetPlugin::<Cell>::default())
+            .insert_state(StreamState::Enabled)
             .insert_resource(frustums::StreamingFrustumsScale::default())
             .insert_resource(LoadedCells::default())
             .insert_resource(MissingCells::default())
             .insert_resource(LoadingCells::default())
             .insert_resource(Stats::default())
+            .configure_sets(
+                Update,
+                CellStreamingSet
+                    .run_if(in_state(MetadataState::Loaded))
+                    .run_if(in_state(StreamState::Enabled)),
+            )
+            .configure_sets(
+                PostUpdate,
+                CellStreamingSet
+                    .run_if(in_state(MetadataState::Loaded))
+                    .run_if(in_state(StreamState::Enabled)),
+            )
             .add_systems(PostStartup, frustums::add_streaming_frustums)
             .add_systems(
                 Update,
@@ -66,18 +94,15 @@ impl Plugin for CellPlugin {
                     ),
                 )
                     .chain()
-                    .run_if(in_state(MetadataState::Loaded))
-                    .run_if(in_state(StreamState::Enabled)),
+                    .in_set(CellStreamingSet),
             )
             .add_systems(
                 OnEnter(MetadataState::Loaded),
                 (
                     set_view_distance,
-                    start_cell_loader,
                     shader::set_frustums_settings_max_hierarchy,
                 ),
             )
-            .add_systems(OnExit(MetadataState::Loaded), stop_cell_loader)
             .add_systems(OnEnter(MetadataState::Loading), cleanup_cells)
             .add_systems(
                 PostUpdate,
@@ -91,101 +116,22 @@ impl Plugin for CellPlugin {
                     shader::update_cells_bind_group,
                 )
                     .chain()
-                    .run_if(in_state(MetadataState::Loaded))
-                    .run_if(in_state(StreamState::Enabled)),
+                    .in_set(CellStreamingSet),
             );
     }
 }
 
 fn set_view_distance(
-    active_metadata: ActiveMetadataRes,
+    active_metadata: ActiveMetadata,
     mut camera_query: Query<&mut PerspectiveProjection, With<Camera>>,
 ) {
     for mut projection in camera_query.iter_mut() {
-        projection.far = active_metadata.metadata.config.max_cell_size;
+        projection.far = active_metadata.get().unwrap().config.max_cell_size;
     }
 }
 
-#[derive(Default)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
-enum CellLoader {
-    #[default]
-    Stopped,
-    Running {
-        load_sender: Sender<LoadCellMsg>,
-        loaded_receiver: Receiver<LoadedCellMsg>,
-    },
-}
-
-impl CellLoader {
-    fn start(&mut self, config: &MetadataConfig) {
-        if let CellLoader::Stopped = self {
-            let (load_sender, load_receiver) = flume::unbounded::<LoadCellMsg>();
-            let (loaded_sender, loaded_receiver) = flume::unbounded::<LoadedCellMsg>();
-
-            loader::spawn_cell_loader(config.clone(), load_receiver, loaded_sender);
-
-            *self = CellLoader::Running {
-                load_sender,
-                loaded_receiver,
-            };
-        }
-    }
-
-    fn stop(&mut self) {
-        if let CellLoader::Running { load_sender, .. } = self {
-            load_sender.send(LoadCellMsg::Stop).unwrap();
-            *self = CellLoader::Stopped;
-        }
-    }
-
-    fn send(&self, msg: LoadCellMsg) -> Result<(), TrySendError<LoadCellMsg>> {
-        if let CellLoader::Running { load_sender, .. } = self {
-            load_sender.try_send(msg)
-        } else {
-            Err(TrySendError::Disconnected(msg))
-        }
-    }
-
-    fn receive(&self) -> Result<LoadedCellMsg, TryRecvError> {
-        if let CellLoader::Running {
-            loaded_receiver, ..
-        } = self
-        {
-            loaded_receiver.try_recv()
-        } else {
-            Err(TryRecvError::Disconnected)
-        }
-    }
-}
-
-impl Drop for CellLoader {
-    fn drop(&mut self) {
-        if let CellLoader::Running { load_sender, .. } = self {
-            load_sender.send(LoadCellMsg::Stop).unwrap();
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-type CellLoaderRes<'w> = Res<'w, CellLoader>;
-
-#[cfg(target_arch = "wasm32")]
-type CellLoaderRes<'w> = NonSend<'w, CellLoader>;
-
-#[cfg(not(target_arch = "wasm32"))]
-type CellLoaderResMut<'w> = ResMut<'w, CellLoader>;
-
-#[cfg(target_arch = "wasm32")]
-type CellLoaderResMut<'w> = NonSendMut<'w, CellLoader>;
-
-fn start_cell_loader(active_metadata: ActiveMetadataRes, mut cell_loader: CellLoaderResMut) {
-    cell_loader.start(&active_metadata.metadata.config);
-}
-
-fn stop_cell_loader(mut cell_loader: CellLoaderResMut) {
-    cell_loader.stop();
-}
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, SystemSet)]
+pub struct CellStreamingSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
 enum StreamState {
@@ -274,6 +220,7 @@ pub struct CellHeader(pub point_converter::cell::Header);
 
 #[derive(Bundle)]
 struct CellBundle {
+    cell_handle: AssetHandle<Cell>,
     header: CellHeader,
     vertex_buffer: VertexBuffer<Point>,
     bind_group_data: CellBindGroupData,
@@ -282,7 +229,8 @@ struct CellBundle {
 
 impl CellBundle {
     fn new(
-        cell: Cell,
+        cell_handle: AssetHandle<Cell>,
+        cell: &Cell,
         device: &wgpu::Device,
         cell_bind_group_layout: &CellBindGroupLayout,
     ) -> Self {
@@ -300,6 +248,7 @@ impl CellBundle {
         let bind_group_data = CellBindGroupData::new(device, cell_bind_group_layout, header.id);
 
         Self {
+            cell_handle,
             header: CellHeader(header),
             vertex_buffer,
             bind_group_data,
@@ -310,45 +259,53 @@ impl CellBundle {
 
 fn receive_cell(
     mut commands: Commands,
-    cell_loader: CellLoaderRes,
+    cell_manager: AssetManagerRes<Cell>,
+    mut loaded_assets_events: EventReader<LoadedAssetEvent<Cell>>,
     device: Res<Device>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
     mut loaded_cells: ResMut<LoadedCells>,
-    mut missing_cells: ResMut<MissingCells>,
+    mut missing_cells: ResMut<MissingCells>, // TODO move missing into manager?
     mut loading_cells: ResMut<LoadingCells>,
 ) {
-    for _ in 0..LoadingCells::MAX_LOADING_SIZE {
-        match cell_loader.receive() {
-            Ok(LoadedCellMsg { id, cell }) => {
-                if !loading_cells.loading.remove(&id) {
-                    log::debug!("Cell {:?} was loaded but no longer needed", id);
+    for event in loaded_assets_events.read() {
+        match event {
+            LoadedAssetEvent::Success { handle } => {
+                let id = handle.id();
+
+                if !loading_cells.loading.remove(id) {
+                    log::debug!("Cell {:?} was loaded but not needed", id);
                     continue;
                 }
 
-                match cell {
-                    Ok(Some(cell)) => {
-                        log::debug!("Loaded cell: {:?}", id);
+                log::debug!("Loaded cell: {:?}", id);
 
-                        let cell_bundle = CellBundle::new(cell, &device, &cell_bind_group_layout);
-                        let entity = commands.spawn(cell_bundle).id();
+                // TODO delay reading of cell
+                let cell = cell_manager.get(id).unwrap();
+                let cell_bundle =
+                    CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
+                let entity = commands.spawn(cell_bundle).id();
 
-                        loaded_cells.0.insert(id, entity);
-                    }
-                    Ok(None) => {
+                loaded_cells.0.insert(*id, entity);
+            }
+            LoadedAssetEvent::Error { id, kind } => {
+                loading_cells.loading.remove(id);
+
+                match kind.as_ref() {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    std::io::ErrorKind::NotFound => {
                         log::debug!("Cell is missing: {:?}", id);
-                        missing_cells.0.put(id, ());
+                        missing_cells.0.put(*id, ());
                     }
-                    Err(err) => {
+                    #[cfg(target_arch = "wasm32")]
+                    "NotFoundError" => {
+                        log::debug!("Cell is missing: {:?}", id);
+                        missing_cells.0.put(*id, ());
+                    }
+                    _ => {
                         // TODO do something with the failed cell
-                        log::error!("Failed to load cell {:?}: {:?}", id, err);
+                        log::error!("Failed to load cell {:?}: {:?}", id, kind);
                     }
                 }
-            }
-            Err(TryRecvError::Disconnected) => {
-                panic!("Failed to stream files as the sender was dropped");
-            }
-            Err(TryRecvError::Empty) => {
-                return;
             }
         }
     }
@@ -363,9 +320,9 @@ fn update_cells(
         (&frustums::StreamingFrustums, &Transform),
         (With<Camera>, Changed<frustums::StreamingFrustums>),
     >,
-    active_metadata: ActiveMetadataRes,
+    active_metadata: ActiveMetadata,
 ) {
-    let metadata = &active_metadata.metadata;
+    let metadata = active_metadata.get().unwrap();
 
     for (streaming_frustums, transform) in camera_query.iter() {
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
@@ -428,8 +385,8 @@ fn update_cells(
 
 fn enqueue_cells_to_load(
     mut loading_cells: ResMut<LoadingCells>,
-    active_metadata: ActiveMetadataRes,
-    cell_loader: CellLoaderRes,
+    active_metadata: ActiveMetadata,
+    cell_manager: AssetManagerRes<Cell>,
 ) {
     let free_load_slots = LoadingCells::MAX_LOADING_SIZE - loading_cells.loading.len();
 
@@ -437,10 +394,40 @@ fn enqueue_cells_to_load(
         if let Some(cell_to_load) = loading_cells.should_load.pop_first() {
             loading_cells.loading.insert(cell_to_load.id);
 
-            cell_loader
-                .send(LoadCellMsg::Cell {
+            let metadata_source = active_metadata.get_source().unwrap();
+
+            #[cfg(not(target_arch = "wasm32"))]
+            let source = {
+                match metadata_source {
+                    Source::Path(path) => {
+                        let parent = path.parent().unwrap();
+                        Source::Path(parent.join(cell_to_load.id.path()))
+                    }
+                    Source::URL(_) => {
+                        todo!()
+                    }
+                }
+            };
+
+            #[cfg(target_arch = "wasm32")]
+            let source = {
+                match metadata_source {
+                    Source::PathInDirectory { directory, .. } => Source::PathInDirectory {
+                        directory: directory.clone(),
+                        path: cell_to_load.id.path(),
+                    },
+                    Source::URL(_) => {
+                        todo!()
+                    }
+                }
+            };
+
+            cell_manager
+                .load_sender()
+                .send(LoadAssetMsg {
                     id: cell_to_load.id,
-                    source: active_metadata.source.clone(),
+                    source,
+                    reply_sender: None,
                 })
                 .unwrap();
         } else {

@@ -1,7 +1,8 @@
-use crate::plugins::streaming::metadata::ActiveMetadataRes;
-use crate::plugins::wgpu::{Device, Queue};
 use bevy_ecs::prelude::*;
 use itertools::Itertools;
+
+use crate::plugins::metadata::ActiveMetadata;
+use crate::plugins::wgpu::{Device, Queue};
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -78,13 +79,13 @@ impl MetadataBindGroupData {
     }
 }
 
-pub(super) fn update_metadata_buffer(
+pub(in crate::plugins) fn update_metadata_buffer(
     device: Res<Device>,
     queue: Res<Queue>,
     mut metadata_bind_group_data: ResMut<MetadataBindGroupData>,
-    active_metadata: ActiveMetadataRes,
+    active_metadata: ActiveMetadata,
 ) {
-    let metadata = &active_metadata.metadata;
+    let metadata = active_metadata.get().unwrap();
 
     let hierarchies = (0..metadata.hierarchies)
         .map(|hierarchy| {
@@ -114,7 +115,7 @@ pub(super) fn update_metadata_buffer(
     }
 }
 
-pub(super) fn setup(world: &mut World) {
+pub(in crate::plugins) fn setup(world: &mut World) {
     let device = world.get_resource::<Device>().unwrap();
     let metadata_bind_group_data = MetadataBindGroupData::new(device);
     world.insert_resource(metadata_bind_group_data);

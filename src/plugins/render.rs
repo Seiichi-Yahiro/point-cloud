@@ -13,8 +13,6 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PointRenderPlugin)
-            .add_plugins(LineRenderPlugin)
-            .add_plugins(UiPlugin);
+        app.add_plugins((PointRenderPlugin, LineRenderPlugin, UiPlugin));
     }
 }

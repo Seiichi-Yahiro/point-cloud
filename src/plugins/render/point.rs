@@ -3,11 +3,11 @@ use bevy_ecs::prelude::*;
 use glam::Vec3;
 
 use crate::plugins::camera::{Camera, ViewBindGroupLayout, Visibility};
-use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::cell::shader::{
+use crate::plugins::cell::shader::{
     CellBindGroupData, CellBindGroupLayout, CellsBindGroup, CellsBindGroupLayout,
 };
-use crate::plugins::streaming::metadata::shader::MetadataBindGroupData;
+use crate::plugins::metadata::shader::MetadataBindGroupData;
+use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::{
     CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
 };

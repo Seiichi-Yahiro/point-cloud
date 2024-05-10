@@ -3,11 +3,13 @@ use std::sync::Arc;
 use cfg_if::cfg_if;
 
 use crate::plugins::camera::CameraPlugin;
+use crate::plugins::cell::CellPlugin;
 use crate::plugins::debug::DebugPlugin;
 use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
+use crate::plugins::metadata::MetadataPlugin;
 use crate::plugins::render::RenderPlugin;
-use crate::plugins::streaming::StreamingPlugin;
+use crate::plugins::thread_pool::ThreadPoolPlugin;
 use crate::plugins::wgpu::WGPUPlugin;
 use crate::plugins::winit::{Window, WinitPlugin};
 
@@ -27,10 +29,12 @@ impl App {
         .await;
 
         app.add_plugins((
+            ThreadPoolPlugin,
             InputPlugin,
             CameraPlugin,
-            StreamingPlugin,
             FPSPlugin,
+            MetadataPlugin,
+            CellPlugin,
             DebugPlugin,
             RenderPlugin,
         ))

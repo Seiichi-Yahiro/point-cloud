@@ -1,8 +1,11 @@
+pub mod asset;
 pub mod camera;
+pub mod cell;
 pub mod debug;
 pub mod fps;
 pub mod input;
+pub mod metadata;
 pub mod render;
-pub mod streaming;
+pub mod thread_pool;
 pub mod wgpu;
 pub mod winit;

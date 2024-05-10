@@ -17,20 +17,11 @@ pub struct CellId {
 }
 
 impl CellId {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn path(&self, working_dir: &Path) -> std::path::PathBuf {
-        working_dir
-            .join(Metadata::hierarchy_string(self.hierarchy))
-            .join(self.index_string())
-            .with_extension(Cell::EXTENSION)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn path(&self) -> [String; 2] {
-        [
-            Metadata::hierarchy_string(self.hierarchy),
-            format!("{}.{}", self.index_string(), Cell::EXTENSION),
-        ]
+    pub fn path(&self) -> std::path::PathBuf {
+        let mut path = std::path::PathBuf::from(Metadata::hierarchy_string(self.hierarchy));
+        path.push(self.index_string());
+        path.set_extension(Cell::EXTENSION);
+        path
     }
 
     pub fn index_string(&self) -> String {

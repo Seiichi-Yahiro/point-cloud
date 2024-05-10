@@ -5,13 +5,12 @@ use glam::Vec3;
 
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::{Camera, Visibility};
+use crate::plugins::cell::frustums::StreamingFrustums;
+use crate::plugins::cell::{CellHeader, CellStreamingSet};
+use crate::plugins::metadata::{ActiveMetadata, MetadataState};
 use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::line::Line;
 use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::streaming::cell::frustums::StreamingFrustums;
-use crate::plugins::streaming::cell::CellHeader;
-use crate::plugins::streaming::metadata::{ActiveMetadataRes, MetadataState};
-use crate::plugins::streaming::CellStreamingSet;
 use crate::plugins::wgpu::Device;
 
 pub struct DebugPlugin;
@@ -206,12 +205,12 @@ struct BoundingBoxLine;
 fn toggle_bounding_box(
     show: In<bool>,
     mut commands: Commands,
-    active_metadata: ActiveMetadataRes,
+    active_metadata: ActiveMetadata,
     device: Res<Device>,
     bounding_box_query: Query<Entity, With<BoundingBoxLine>>,
 ) {
     if *show {
-        let aabb = active_metadata.metadata.bounding_box;
+        let aabb = active_metadata.get().unwrap().bounding_box;
         let lines = line_box(
             [255, 0, 0, 255],
             (aabb.min + aabb.max) / 2.0,
@@ -225,8 +224,8 @@ fn toggle_bounding_box(
     }
 }
 
-fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadataRes) {
-    let hierarchies = active_metadata.metadata.hierarchies as usize;
+fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadata) {
+    let hierarchies = active_metadata.get().unwrap().hierarchies as usize;
     state.grid.hierarchies = vec![true; hierarchies];
     state.streaming_frustums_visibility.hierarchies = vec![true; hierarchies];
     state.hierarchy_visibility.hierarchies = vec![true; hierarchies];

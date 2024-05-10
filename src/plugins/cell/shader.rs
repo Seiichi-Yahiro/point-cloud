@@ -6,9 +6,9 @@ use wgpu::util::DeviceExt;
 use point_converter::cell::CellId;
 
 use crate::plugins::camera::Camera;
-use crate::plugins::streaming::cell::frustums::StreamingFrustums;
-use crate::plugins::streaming::cell::CellHeader;
-use crate::plugins::streaming::metadata::ActiveMetadataRes;
+use crate::plugins::cell::frustums::StreamingFrustums;
+use crate::plugins::cell::CellHeader;
+use crate::plugins::metadata::ActiveMetadata;
 use crate::plugins::wgpu::{Device, Queue};
 use crate::transform::Transform;
 
@@ -288,10 +288,10 @@ pub(super) fn update_frustums_buffer(
 }
 
 pub(super) fn set_frustums_settings_max_hierarchy(
-    active_metadata: ActiveMetadataRes,
+    active_metadata: ActiveMetadata,
     mut frustums_settings: ResMut<FrustumsSettings>,
 ) {
-    frustums_settings.max_hierarchy = active_metadata.metadata.hierarchies - 1;
+    frustums_settings.max_hierarchy = active_metadata.get().unwrap().hierarchies - 1;
 }
 
 pub(super) fn update_frustums_settings_buffer(
