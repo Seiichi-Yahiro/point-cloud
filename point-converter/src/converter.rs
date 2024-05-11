@@ -13,7 +13,7 @@ pub use own::BatchedPointCloudPointReader;
 pub use ply::BatchedPlyPointReader;
 
 use crate::cell::{Cell, CellId};
-use crate::metadata::{Metadata, MetadataConfig};
+use crate::metadata::{BoundingBox, Metadata, MetadataConfig};
 use crate::point::Point;
 
 mod las;
@@ -92,7 +92,29 @@ impl Converter {
         }
     }
 
+    fn update_bounding_box(&mut self, points: &[Point]) {
+        let mut point_iter = points.iter();
+
+        if let Some(first_point) = point_iter.next() {
+            let mut bb = BoundingBox::new(first_point.pos, first_point.pos);
+
+            for point in point_iter {
+                bb.extend(*point);
+            }
+
+            if self.metadata.number_of_points == 0 {
+                self.metadata.bounding_box = bb;
+            } else {
+                self.metadata.bounding_box.min = self.metadata.bounding_box.min.min(bb.min);
+                self.metadata.bounding_box.max = self.metadata.bounding_box.max.max(bb.max);
+            }
+        }
+    }
+
     pub fn add_points_batch(&mut self, points: Vec<Point>) {
+        self.update_bounding_box(&points);
+        self.metadata.number_of_points += points.len() as u64;
+
         let grouped_points = group_points(points, 0, &self.metadata.config);
         self.add_points_in_hierarchy(0, &self.metadata.config.clone(), grouped_points);
     }
