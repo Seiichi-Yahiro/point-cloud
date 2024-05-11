@@ -4,6 +4,7 @@ use cfg_if::cfg_if;
 
 use crate::plugins::camera::CameraPlugin;
 use crate::plugins::cell::CellPlugin;
+use crate::plugins::converter::ConverterPlugin;
 use crate::plugins::debug::DebugPlugin;
 use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
@@ -28,17 +29,16 @@ impl App {
         )
         .await;
 
-        app.add_plugins((
-            ThreadPoolPlugin,
-            InputPlugin,
-            CameraPlugin,
-            FPSPlugin,
-            MetadataPlugin,
-            CellPlugin,
-            DebugPlugin,
-            RenderPlugin,
-        ))
-        .run();
+        app.add_plugins((InputPlugin, CameraPlugin, FPSPlugin))
+            .add_plugins((
+                ThreadPoolPlugin,
+                ConverterPlugin,
+                MetadataPlugin,
+                CellPlugin,
+                DebugPlugin,
+                RenderPlugin,
+            ))
+            .run();
     }
 }
 

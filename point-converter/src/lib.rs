@@ -60,22 +60,24 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
 
 pub fn get_batched_point_reader<P: AsRef<std::path::Path>>(
     path: P,
-) -> Option<Box<dyn BatchedPointReader>> {
+) -> Option<Box<dyn BatchedPointReader + Send>> {
     let extension = path
         .as_ref()
         .extension()
         .and_then(|it| it.to_str())
         .map(String::from);
 
-    extension.and_then::<Box<dyn BatchedPointReader>, _>(|extension| match extension.as_str() {
-        "las" | "laz" => Some(Box::new(converter::BatchedLasPointReader::new(path))),
-        "ply" => Some(Box::new(converter::BatchedPlyPointReader::new(path))),
-        metadata::Metadata::EXTENSION => Some(Box::new(
-            converter::BatchedPointCloudPointReader::new(path).unwrap(),
-        )),
-        _ => {
-            log::warn!("Unsupported file format '{}'", extension);
-            None
+    extension.and_then::<Box<dyn BatchedPointReader + Send>, _>(|extension| {
+        match extension.as_str() {
+            "las" | "laz" => Some(Box::new(converter::BatchedLasPointReader::new(path))),
+            "ply" => Some(Box::new(converter::BatchedPlyPointReader::new(path))),
+            metadata::Metadata::EXTENSION => Some(Box::new(
+                converter::BatchedPointCloudPointReader::new(path).unwrap(),
+            )),
+            _ => {
+                log::warn!("Unsupported file format '{}'", extension);
+                None
+            }
         }
     })
 }

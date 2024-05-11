@@ -106,6 +106,10 @@ fn ui(world: &mut World) {
                         crate::plugins::cell::draw_ui(ui, world);
                     });
 
+                ui.collapsing("Converter", |ui| {
+                    crate::plugins::converter::draw_ui(ui, world);
+                });
+
                 ui.collapsing("Camera", |ui| {
                     crate::plugins::camera::draw_ui(ui, world);
                 });

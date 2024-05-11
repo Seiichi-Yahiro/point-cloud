@@ -1,6 +1,7 @@
 pub mod asset;
 pub mod camera;
 pub mod cell;
+pub mod converter;
 pub mod debug;
 pub mod fps;
 pub mod input;

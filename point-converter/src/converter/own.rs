@@ -8,7 +8,7 @@ use crate::point::Point;
 
 pub struct BatchedPointCloudPointReader {
     metadata: Metadata,
-    point_iterator: Box<dyn Iterator<Item = Point>>,
+    point_iterator: Box<dyn Iterator<Item = Point> + Send>,
     read_points: u64,
 }
 

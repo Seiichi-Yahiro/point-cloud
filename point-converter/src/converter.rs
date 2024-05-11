@@ -28,7 +28,7 @@ pub trait BatchedPointReader {
     fn remaining_points(&self) -> u64;
 }
 
-fn group_points(
+pub fn group_points(
     points: Vec<Point>,
     hierarchy: u32,
     config: &MetadataConfig,
@@ -58,7 +58,7 @@ fn merge_point_maps(left: &mut FxHashMap<IVec3, Vec<Point>>, right: FxHashMap<IV
     }
 }
 
-fn add_points_to_cell(
+pub fn add_points_to_cell(
     config: &MetadataConfig,
     points: Vec<Point>,
     cell: &mut Cell,

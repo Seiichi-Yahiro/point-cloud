@@ -1,6 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::fmt::Debug;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 
 use bevy_app::prelude::*;
@@ -82,6 +82,26 @@ where
 
     pub fn id(&self) -> &T::Id {
         &self.id
+    }
+}
+
+impl<T> PartialEq for AssetHandle<T>
+where
+    T: Asset,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl<T> Eq for AssetHandle<T> where T: Asset {}
+
+impl<T> Hash for AssetHandle<T>
+where
+    T: Asset,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }
 
@@ -179,14 +199,6 @@ where
     Decrease(T),
 }
 
-pub struct BorrowedAsset<T>
-where
-    T: Asset,
-{
-    asset: T,
-    return_sender: Sender<T>,
-}
-
 #[derive(Debug)]
 enum AssetStatus<T>
 where
@@ -194,7 +206,6 @@ where
 {
     Loading,
     Loaded(T),
-    TemporarilyUnavailable,
 }
 
 impl<T> AssetStatus<T>
@@ -203,39 +214,16 @@ where
 {
     pub fn get_asset(&self) -> Option<&T> {
         match self {
-            AssetStatus::Loading | AssetStatus::TemporarilyUnavailable => None,
+            AssetStatus::Loading => None,
             AssetStatus::Loaded(asset) => Some(asset),
         }
     }
 
     pub fn get_asset_mut(&mut self) -> Option<&mut T> {
         match self {
-            AssetStatus::Loading | AssetStatus::TemporarilyUnavailable => None,
+            AssetStatus::Loading => None,
             AssetStatus::Loaded(asset) => Some(asset),
         }
-    }
-
-    fn borrow_asset(&mut self, return_sender: Sender<T>) -> Option<BorrowedAsset<T>> {
-        match self {
-            Self::Loading | Self::TemporarilyUnavailable => None,
-            Self::Loaded(_) => {
-                let loaded_asset_status = std::mem::replace(self, Self::TemporarilyUnavailable);
-
-                match loaded_asset_status {
-                    Self::Loaded(asset) => Some(BorrowedAsset {
-                        asset,
-                        return_sender,
-                    }),
-                    _ => {
-                        unreachable!("asset status should be loaded")
-                    }
-                }
-            }
-        }
-    }
-
-    fn return_borrowed(&mut self, asset: T) {
-        *self = Self::Loaded(asset);
     }
 }
 
@@ -251,7 +239,6 @@ where
     ref_count_channels: Channels<ChangeRefCount<T::Id>>,
     ref_counts: FxHashMap<T::Id, u32>,
     waiting_for_reply: FxHashMap<T::Id, Vec<Sender<LoadedAssetEvent<T>>>>,
-    borrow_channels: Channels<T>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -278,7 +265,6 @@ where
             ref_count_channels: Channels::default(),
             ref_counts: FxHashMap::default(),
             waiting_for_reply: FxHashMap::default(),
-            borrow_channels: Channels::default(),
         }
     }
 }
@@ -291,6 +277,13 @@ where
         &self.load_channels.sender
     }
 
+    #[must_use]
+    pub fn insert(&mut self, id: T::Id, asset: T) -> AssetHandle<T> {
+        self.store.insert(id.clone(), AssetStatus::Loaded(asset));
+        self.ref_counts.insert(id.clone(), 0);
+        AssetHandle::new(id, self.ref_count_channels.sender.clone())
+    }
+
     pub fn get(&self, id: &T::Id) -> Option<&T> {
         self.store
             .get(id)
@@ -301,12 +294,6 @@ where
         self.store
             .get_mut(id)
             .and_then(|asset_status| asset_status.get_asset_mut())
-    }
-
-    pub fn borrow_asset(&mut self, id: &T::Id) -> Option<BorrowedAsset<T>> {
-        self.store
-            .get_mut(id)
-            .and_then(|asset_status| asset_status.borrow_asset(self.borrow_channels.sender.clone()))
     }
 
     fn handle_load_events(
@@ -323,7 +310,7 @@ where
                                 AssetStatus::Loading => {
                                     // is already loading do nothing
                                 }
-                                AssetStatus::Loaded(_) | AssetStatus::TemporarilyUnavailable => {
+                                AssetStatus::Loaded(_) => {
                                     let handle = AssetHandle::new(
                                         msg.id,
                                         self.ref_count_channels.sender.clone(),
