@@ -1,5 +1,7 @@
 pub(crate) use byteorder::LittleEndian as Endianess;
 
+use crate::converter::BatchedPointReader;
+
 pub mod cell;
 pub mod converter;
 pub mod metadata;
@@ -19,25 +21,32 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
             path
         );
 
-        if let Some(extension) = path.extension().and_then(|it| it.to_str()) {
-            match extension {
-                "las" | "laz" => {
-                    if let Err(err) = converter::convert_las(path, &mut converter) {
-                        log::error!("Failed, {:?}", err);
+        if let Some(mut batched_reader) = get_batched_point_reader(path) {
+            let total_points = batched_reader.total_points();
+            log::info!("Converting {} points", total_points);
+
+            let mut file_instant = std::time::Instant::now();
+
+            loop {
+                match batched_reader.get_batch(10_000) {
+                    Ok(batch) => {
+                        converter.add_points_batch(batch);
+                    }
+                    Err(err) => {
+                        log::error!("{:?}", err);
+                        break;
                     }
                 }
-                "ply" => {
-                    if let Err(err) = converter::convert_ply(path, &mut converter) {
-                        log::error!("Failed, {:?}", err);
-                    }
+
+                let remaining_points = batched_reader.remaining_points();
+
+                if file_instant.elapsed() > std::time::Duration::from_millis(5000) {
+                    log::info!("Remaining points: {}", remaining_points);
+                    file_instant = std::time::Instant::now();
                 }
-                metadata::Metadata::EXTENSION => {
-                    if let Err(err) = converter::convert_own(path, &mut converter) {
-                        log::error!("Failed, {:?}", err);
-                    }
-                }
-                _ => {
-                    log::warn!("Unsupported file format '{}'", extension)
+
+                if remaining_points == 0 {
+                    break;
                 }
             }
         }
@@ -47,6 +56,28 @@ pub fn convert_from_paths<O: AsRef<std::path::Path>>(paths: &[std::path::PathBuf
         "Finished converting after {} ms",
         total_instant.elapsed().as_millis()
     );
+}
+
+pub fn get_batched_point_reader<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Option<Box<dyn BatchedPointReader>> {
+    let extension = path
+        .as_ref()
+        .extension()
+        .and_then(|it| it.to_str())
+        .map(String::from);
+
+    extension.and_then::<Box<dyn BatchedPointReader>, _>(|extension| match extension.as_str() {
+        "las" | "laz" => Some(Box::new(converter::BatchedLasPointReader::new(path))),
+        "ply" => Some(Box::new(converter::BatchedPlyPointReader::new(path))),
+        metadata::Metadata::EXTENSION => Some(Box::new(
+            converter::BatchedPointCloudPointReader::new(path).unwrap(),
+        )),
+        _ => {
+            log::warn!("Unsupported file format '{}'", extension);
+            None
+        }
+    })
 }
 
 fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
@@ -63,11 +94,5 @@ fn load_metadata(output: &std::path::Path) -> metadata::Metadata {
             log::info!("Found no metadata file. A new one will be created.");
             metadata::Metadata::default()
         }
-    }
-}
-
-fn log_progress(i: usize, number_of_points: usize) {
-    if i % (number_of_points as f32 * 0.05) as usize == 0 {
-        log::info!("{}/{}", i, number_of_points);
     }
 }

@@ -1,76 +1,88 @@
-use crate::{cell, converter, metadata};
-use std::io::ErrorKind;
+use std::io::{Error, ErrorKind};
+use std::path::Path;
 
-pub fn convert_own(
-    path: &std::path::Path,
-    converter: &mut converter::Converter,
-) -> Result<(), std::io::Error> {
-    match metadata::Metadata::from_path(path) {
-        Ok(metadata) => {
-            log::info!("Found metadata with {} points", metadata.number_of_points);
+use crate::cell::Cell;
+use crate::converter::BatchedPointReader;
+use crate::metadata::Metadata;
+use crate::point::Point;
 
-            let working_dir = path.parent().unwrap();
+pub struct BatchedPointCloudPointReader {
+    metadata: Metadata,
+    point_iterator: Box<dyn Iterator<Item = Point>>,
+    read_points: u64,
+}
 
-            for hierarchy in 0..metadata.hierarchies {
-                log::info!(
-                    "Reading hierarchy directory {}/{}",
-                    hierarchy + 1,
-                    metadata.hierarchies
-                );
+impl BatchedPointCloudPointReader {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        match Metadata::from_path(path.as_ref()) {
+            Ok(metadata) => {
+                let working_directory = path.as_ref().parent().unwrap().to_path_buf();
+                let config = metadata.config.clone();
 
-                let hierarchy_dir = working_dir.join(format!("h_{}", hierarchy));
+                let point_iterator = (0..metadata.hierarchies)
+                    .map(move |hierarchy| {
+                        working_directory.join(Metadata::hierarchy_string(hierarchy))
+                    })
+                    .map(|hierarchy_path| hierarchy_path.read_dir())
+                    .filter_map(|read_dir_result| match read_dir_result {
+                        Ok(read_dir) => Some(read_dir),
+                        Err(err) => {
+                            log::error!("Failed to read dir: {}", err);
+                            None
+                        }
+                    })
+                    .flatten()
+                    .filter_map(|dir_entry_result| match dir_entry_result {
+                        Ok(dir_entry) => Some(dir_entry.path()),
+                        Err(err) => {
+                            log::error!("Failed to read file: {}", err);
+                            None
+                        }
+                    })
+                    .map(move |cell_path| Cell::from_path(cell_path, &config))
+                    .filter_map(|cell_result| match cell_result {
+                        Ok(cell) => Some(cell),
+                        Err(err) => {
+                            log::error!("Failed to read cell {}", err);
+                            None
+                        }
+                    })
+                    .flat_map(|cell| cell.all_points().copied().collect::<Vec<_>>());
 
-                let hierarchy_instant = std::time::Instant::now();
-
-                convert_hierarchy(&metadata, &hierarchy_dir, converter);
-
-                log::info!(
-                    "Finished hierarchy after {} ms",
-                    hierarchy_instant.elapsed().as_millis()
-                );
+                Ok(Self {
+                    metadata,
+                    point_iterator: Box::new(point_iterator),
+                    read_points: 0,
+                })
             }
-
-            Ok(())
+            Err(err) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Couldn't parse metadata at {:?}: {}", path.as_ref(), err),
+            )),
         }
-        Err(err) => Err(std::io::Error::new(
-            ErrorKind::InvalidInput,
-            format!("Couldn't parse metadata at {:?}: {}", path, err),
-        )),
     }
 }
 
-fn convert_hierarchy(
-    metadata: &metadata::Metadata,
-    path: &std::path::Path,
-    converter: &mut converter::Converter,
-) {
-    match path.read_dir() {
-        Ok(read_dir) => {
-            for entry in read_dir {
-                match entry {
-                    Ok(cell_entry) => {
-                        let cell_path = cell_entry.path();
+impl BatchedPointReader for BatchedPointCloudPointReader {
+    fn get_batch(&mut self, size: usize) -> Result<Vec<Point>, Error> {
+        let batch_size = self.remaining_points().min(size as u64);
+        let mut batch = Vec::with_capacity(batch_size as usize);
 
-                        match cell::Cell::from_path(&cell_path, &metadata.config) {
-                            Ok(cell) => {
-                                for point in cell.all_points() {
-                                    //TODO converter.add_point(*point);
-                                }
-                            }
-                            Err(err) => {
-                                let file_name = cell_path.file_name().unwrap();
-                                log::error!("Failed to read cell {:?}: {}", file_name, err);
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        log::error!("Failed to read cell {}", err);
-                    }
-                }
+        for _ in 0..batch_size {
+            if let Some(point) = self.point_iterator.next() {
+                batch.push(point);
+                self.read_points += 1;
             }
         }
-        Err(err) => {
-            log::error!("Failed to read dir {:?}: {}", path, err);
-        }
+
+        Ok(batch)
+    }
+
+    fn total_points(&self) -> u64 {
+        self.metadata.number_of_points
+    }
+
+    fn remaining_points(&self) -> u64 {
+        self.total_points() - self.read_points
     }
 }

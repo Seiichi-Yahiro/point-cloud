@@ -8,9 +8,9 @@ use caches::{Cache, LRUCache, PutResult};
 use glam::IVec3;
 use rustc_hash::{FxHashMap, FxHasher};
 
-pub use las::convert_las;
-pub use own::convert_own;
-pub use ply::convert_ply;
+pub use las::BatchedLasPointReader;
+pub use own::BatchedPointCloudPointReader;
+pub use ply::BatchedPlyPointReader;
 
 use crate::cell::{Cell, CellId};
 use crate::metadata::{Metadata, MetadataConfig};
@@ -19,6 +19,14 @@ use crate::point::Point;
 mod las;
 mod own;
 mod ply;
+
+pub trait BatchedPointReader {
+    fn get_batch(&mut self, size: usize) -> Result<Vec<Point>, std::io::Error>;
+
+    fn total_points(&self) -> u64;
+
+    fn remaining_points(&self) -> u64;
+}
 
 fn group_points(
     points: Vec<Point>,

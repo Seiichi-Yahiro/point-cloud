@@ -1,57 +1,82 @@
-use crate::{converter, log_progress, point};
-use ply_rs::ply::Encoding;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Error};
+use std::path::Path;
 
-pub fn convert_ply(
-    path: &std::path::Path,
-    converter: &mut converter::Converter,
-) -> Result<(), std::io::Error> {
-    let file = std::fs::File::open(path).unwrap();
-    let mut buf_reader = std::io::BufReader::new(file);
+use ply_rs::parser::Parser;
+use ply_rs::ply::{Encoding, Header};
 
-    let parser = ply_rs::parser::Parser::<point::Point>::new();
-    let header = parser.read_header(&mut buf_reader)?;
+use crate::converter::BatchedPointReader;
+use crate::point::Point;
 
-    if let Some(element) = header.elements.get("vertex") {
-        let number_of_points = element.count;
+pub struct BatchedPlyPointReader {
+    buf_reader: BufReader<File>,
+    parser: Parser<Point>,
+    header: Header,
+    read_points: u64,
+}
 
-        log::info!("Will load {} points", number_of_points);
+impl BatchedPlyPointReader {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        let file = File::open(path).unwrap();
+        let mut buf_reader = BufReader::new(file);
 
-        let file_instant = std::time::Instant::now();
+        let parser = Parser::new();
+        let header = parser.read_header(&mut buf_reader).unwrap();
 
-        let mut read_point: Box<dyn FnMut() -> Result<point::Point, std::io::Error>> = match header
-            .encoding
-        {
+        Self {
+            buf_reader,
+            parser,
+            header,
+            read_points: 0,
+        }
+    }
+}
+
+impl BatchedPointReader for BatchedPlyPointReader {
+    fn get_batch(&mut self, size: usize) -> Result<Vec<Point>, Error> {
+        let element = self.header.elements.get("vertex").unwrap();
+        let point_count = self.remaining_points().min(size as u64);
+
+        let mut batch = Vec::with_capacity(point_count as usize);
+
+        match self.header.encoding {
             Encoding::Ascii => {
-                let points = parser.read_payload_for_element(&mut buf_reader, element, &header)?;
-
-                log::info!("Finished loading points will start converting now.");
-
-                for (i, point) in points.into_iter().enumerate() {
-                    // TODO converter.add_point(point);
-                    log_progress(i, number_of_points);
+                let mut line_str = String::new();
+                for _ in 0..point_count {
+                    line_str.clear();
+                    self.buf_reader.read_line(&mut line_str)?;
+                    self.parser.read_ascii_element(&line_str, element)?;
+                    self.read_points += 1;
                 }
-
-                return Ok(());
             }
             Encoding::BinaryBigEndian => {
-                Box::new(|| parser.read_big_endian_element(&mut buf_reader, element))
+                for _ in 0..point_count {
+                    let point = self
+                        .parser
+                        .read_big_endian_element(&mut self.buf_reader, element)?;
+                    batch.push(point);
+                    self.read_points += 1;
+                }
             }
             Encoding::BinaryLittleEndian => {
-                Box::new(|| parser.read_little_endian_element(&mut buf_reader, element))
+                for _ in 0..point_count {
+                    let point = self
+                        .parser
+                        .read_little_endian_element(&mut self.buf_reader, element)?;
+                    batch.push(point);
+                    self.read_points += 1;
+                }
             }
-        };
-
-        for i in 0..number_of_points {
-            let point = read_point()?;
-            //TODO converter.add_point(point);
-            log_progress(i, number_of_points);
         }
 
-        log::info!(
-            "Finished file after {} ms",
-            file_instant.elapsed().as_millis()
-        );
+        Ok(batch)
     }
 
-    Ok(())
+    fn total_points(&self) -> u64 {
+        self.header.elements.get("vertex").unwrap().count as u64
+    }
+
+    fn remaining_points(&self) -> u64 {
+        self.total_points() - self.read_points
+    }
 }
