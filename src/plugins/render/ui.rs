@@ -106,6 +106,7 @@ fn ui(world: &mut World) {
                         crate::plugins::cell::draw_ui(ui, world);
                     });
 
+                #[cfg(not(target_arch = "wasm32"))]
                 ui.collapsing("Converter", |ui| {
                     crate::plugins::converter::draw_ui(ui, world);
                 });

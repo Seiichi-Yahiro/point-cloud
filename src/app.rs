@@ -4,7 +4,6 @@ use cfg_if::cfg_if;
 
 use crate::plugins::camera::CameraPlugin;
 use crate::plugins::cell::CellPlugin;
-use crate::plugins::converter::ConverterPlugin;
 use crate::plugins::debug::DebugPlugin;
 use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
@@ -32,7 +31,8 @@ impl App {
         app.add_plugins((InputPlugin, CameraPlugin, FPSPlugin))
             .add_plugins((
                 ThreadPoolPlugin,
-                ConverterPlugin,
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugins::converter::ConverterPlugin,
                 MetadataPlugin,
                 CellPlugin,
                 DebugPlugin,

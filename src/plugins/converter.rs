@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy_app::prelude::*;
@@ -13,7 +13,7 @@ use point_converter::converter::{add_points_to_cell, group_points};
 use point_converter::metadata::{Metadata, MetadataConfig};
 use point_converter::point::Point;
 
-use crate::plugins::asset::source::Source;
+use crate::plugins::asset::source::Directory;
 use crate::plugins::asset::{AssetManagerRes, AssetManagerResMut, LoadAssetMsg, LoadedAssetEvent};
 use crate::plugins::thread_pool::ThreadPool;
 
@@ -57,7 +57,7 @@ enum FileConversionStatus {
 
 #[derive(Debug)]
 struct FileToConvert {
-    path: std::path::PathBuf,
+    path: PathBuf,
     status: FileConversionStatus,
 }
 
@@ -104,8 +104,9 @@ fn get_point_batch(
     let load_sender = cell_manager.load_sender().clone();
 
     // TODO real source
-    let working_directory =
-        PathBuf::from("C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2");
+    let working_directory = Directory::Path(PathBuf::from(
+        "C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2",
+    ));
 
     thread_pool.execute(move || match reader.lock().get_batch(10_000) {
         Ok(points) => {
@@ -140,7 +141,7 @@ impl CellTask {
     fn new(
         id: CellId,
         points: Vec<Point>,
-        working_directory: &Path,
+        working_directory: &Directory,
         load_sender: &Sender<LoadAssetMsg<Cell>>,
     ) -> Self {
         let (sender, receiver) = flume::bounded(1);
@@ -148,7 +149,7 @@ impl CellTask {
         load_sender
             .send(LoadAssetMsg {
                 id,
-                source: Source::Path(working_directory.join(id.path())),
+                source: working_directory.join(&id.path()),
                 reply_sender: Some(sender),
             })
             .unwrap();
@@ -201,7 +202,10 @@ fn add_points_to_cell_system(
 ) {
     for _ in 0..cell_tasks.tasks.len().min(10) {
         if let Some(task) = cell_tasks.tasks.pop_front() {
-            let config = MetadataConfig::default(); // TODO real config
+            let config = MetadataConfig::default(); // TODO real config and source
+            let working_directory = Directory::Path(PathBuf::from(
+                "C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2",
+            ));
 
             match task.loaded_asset_receiver.try_recv() {
                 Ok(loaded_asset_event) => {
@@ -213,7 +217,7 @@ fn add_points_to_cell_system(
                                 handle.id()
                             );
 
-                            let cell = cell_manager.get_mut(handle.id()).unwrap();
+                            let cell = cell_manager.get_mut(&handle).asset_mut();
                             (*handle.id(), add_points_to_cell(&config, task.points, cell))
                         }
                         LoadedAssetEvent::Error { id, kind } => {
@@ -242,7 +246,9 @@ fn add_points_to_cell_system(
                             let remaining_points =
                                 add_points_to_cell(&config, task.points, &mut cell);
 
-                            let _handle = cell_manager.insert(id, cell); // TODO save handle?
+                            let source = working_directory.join(&id.path());
+
+                            let _handle = cell_manager.insert(id, cell, source); // TODO save handle?
 
                             (id, remaining_points)
                         }
@@ -253,11 +259,6 @@ fn add_points_to_cell_system(
                             hierarchy: id.hierarchy + 1,
                             index: cell_index,
                         };
-
-                        // TODO real source
-                        let working_directory = PathBuf::from(
-                            "C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2",
-                        );
 
                         let task = CellTask::new(
                             id,

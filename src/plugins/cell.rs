@@ -16,7 +16,7 @@ use thousands::Separable;
 use point_converter::cell::{Cell, CellId};
 use point_converter::metadata::MetadataConfig;
 
-use crate::plugins::asset::source::{LoadError, Source};
+use crate::plugins::asset::source::IOError;
 use crate::plugins::asset::{
     Asset, AssetHandle, AssetManagerRes, AssetPlugin, LoadAssetMsg, LoadedAssetEvent,
 };
@@ -36,7 +36,7 @@ pub mod shader;
 impl Asset for Cell {
     type Id = CellId;
 
-    fn from_reader(reader: &mut dyn Read) -> Result<Self, LoadError> {
+    fn read_from(reader: &mut dyn Read) -> Result<Self, IOError> {
         // TODO config
         let result = Cell::read_from(reader, &MetadataConfig::default());
 
@@ -51,6 +51,42 @@ impl Asset for Cell {
 
         #[cfg(not(target_arch = "wasm32"))]
         return result;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save(&self, source: crate::plugins::asset::source::Source) -> Result<(), IOError> {
+        use crate::plugins::asset::source::Source;
+        use std::fs::{create_dir, File};
+        use std::io::{BufWriter, ErrorKind, Write};
+
+        match source {
+            Source::Path(path) => {
+                log::debug!("Saving cell at {:?}", path);
+
+                if let Err(err) = create_dir(path.parent().unwrap()) {
+                    match err.kind() {
+                        ErrorKind::AlreadyExists => {}
+                        _ => {
+                            return Err(err);
+                        }
+                    }
+                }
+
+                let file = File::create(path)?;
+                let mut buf_writer = BufWriter::new(file);
+                self.write_to(&mut buf_writer)?;
+                buf_writer.flush()
+            }
+            Source::URL(_) => {
+                todo!()
+            }
+            Source::None => Ok(()),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn should_save(&self) -> bool {
+        true
     }
 }
 
@@ -280,7 +316,7 @@ fn receive_cell(
                 log::debug!("Loaded cell: {:?}", id);
 
                 // TODO delay reading of cell
-                let cell = cell_manager.get(id).unwrap();
+                let cell = cell_manager.get(handle).asset();
                 let cell_bundle =
                     CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
                 let entity = commands.spawn(cell_bundle).id();
@@ -394,33 +430,8 @@ fn enqueue_cells_to_load(
         if let Some(cell_to_load) = loading_cells.should_load.pop_first() {
             loading_cells.loading.insert(cell_to_load.id);
 
-            let metadata_source = active_metadata.get_source().unwrap();
-
-            #[cfg(not(target_arch = "wasm32"))]
-            let source = {
-                match metadata_source {
-                    Source::Path(path) => {
-                        let parent = path.parent().unwrap();
-                        Source::Path(parent.join(cell_to_load.id.path()))
-                    }
-                    Source::URL(_) => {
-                        todo!()
-                    }
-                }
-            };
-
-            #[cfg(target_arch = "wasm32")]
-            let source = {
-                match metadata_source {
-                    Source::PathInDirectory { directory, .. } => Source::PathInDirectory {
-                        directory: directory.clone(),
-                        path: cell_to_load.id.path(),
-                    },
-                    Source::URL(_) => {
-                        todo!()
-                    }
-                }
-            };
+            let working_directory = active_metadata.get_working_directory().unwrap();
+            let source = working_directory.join(&cell_to_load.id.path());
 
             cell_manager
                 .load_sender()

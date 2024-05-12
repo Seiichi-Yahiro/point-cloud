@@ -8,7 +8,7 @@ use bevy_ecs::prelude::*;
 use flume::{Receiver, Sender, TryRecvError};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::plugins::asset::source::{LoadError, LoadErrorKind, Source};
+use crate::plugins::asset::source::{IOError, IOErrorKind, Source};
 use crate::plugins::thread_pool::{ThreadPool, ThreadPoolRes};
 
 pub mod source;
@@ -53,7 +53,15 @@ where
 pub trait Asset: Send + Sync + Sized + 'static {
     type Id: Debug + Eq + Hash + Clone + Send + Sync;
 
-    fn from_reader(reader: &mut dyn Read) -> Result<Self, LoadError>;
+    fn read_from(reader: &mut dyn Read) -> Result<Self, IOError>;
+
+    fn save(&self, _source: Source) -> Result<(), IOError> {
+        Ok(())
+    }
+
+    fn should_save(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Component)]
@@ -148,7 +156,7 @@ where
     T: Asset,
 {
     id: T::Id,
-    asset: Result<T, LoadError>,
+    asset: Result<T, IOError>,
 }
 
 #[derive(Debug, Event)]
@@ -157,7 +165,7 @@ where
     T: Asset,
 {
     Success { handle: AssetHandle<T> },
-    Error { id: T::Id, kind: LoadErrorKind },
+    Error { id: T::Id, kind: IOErrorKind },
 }
 
 impl<T> Clone for LoadedAssetEvent<T>
@@ -200,31 +208,40 @@ where
 }
 
 #[derive(Debug)]
-enum AssetStatus<T>
+pub struct AssetEntry<T>
 where
     T: Asset,
 {
-    Loading,
-    Loaded(T),
+    source: Source,
+    status: AssetStatus,
+    asset: Option<T>,
 }
 
-impl<T> AssetStatus<T>
+impl<T> AssetEntry<T>
 where
     T: Asset,
 {
-    pub fn get_asset(&self) -> Option<&T> {
-        match self {
-            AssetStatus::Loading => None,
-            AssetStatus::Loaded(asset) => Some(asset),
-        }
+    pub fn asset(&self) -> &T {
+        self.asset.as_ref().unwrap()
     }
 
-    pub fn get_asset_mut(&mut self) -> Option<&mut T> {
-        match self {
-            AssetStatus::Loading => None,
-            AssetStatus::Loaded(asset) => Some(asset),
-        }
+    pub fn asset_mut(&mut self) -> &mut T {
+        self.asset.as_mut().unwrap()
     }
+
+    pub fn source(&self) -> &Source {
+        &self.source
+    }
+
+    pub fn status(&self) -> AssetStatus {
+        self.status
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum AssetStatus {
+    Loading,
+    Loaded,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
@@ -233,7 +250,7 @@ pub struct AssetManager<T>
 where
     T: Asset,
 {
-    store: FxHashMap<T::Id, AssetStatus<T>>,
+    store: FxHashMap<T::Id, AssetEntry<T>>,
     load_channels: Channels<LoadAssetMsg<T>>,
     loaded_channels: Channels<LoadedAssetMsg<T>>,
     ref_count_channels: Channels<ChangeRefCount<T::Id>>,
@@ -278,22 +295,25 @@ where
     }
 
     #[must_use]
-    pub fn insert(&mut self, id: T::Id, asset: T) -> AssetHandle<T> {
-        self.store.insert(id.clone(), AssetStatus::Loaded(asset));
+    pub fn insert(&mut self, id: T::Id, asset: T, source: Source) -> AssetHandle<T> {
+        self.store.insert(
+            id.clone(),
+            AssetEntry {
+                source,
+                status: AssetStatus::Loaded,
+                asset: Some(asset),
+            },
+        );
         self.ref_counts.insert(id.clone(), 0);
         AssetHandle::new(id, self.ref_count_channels.sender.clone())
     }
 
-    pub fn get(&self, id: &T::Id) -> Option<&T> {
-        self.store
-            .get(id)
-            .and_then(|asset_status| asset_status.get_asset())
+    pub fn get(&self, handle: &AssetHandle<T>) -> &AssetEntry<T> {
+        self.store.get(handle.id()).unwrap()
     }
 
-    pub fn get_mut(&mut self, id: &T::Id) -> Option<&mut T> {
-        self.store
-            .get_mut(id)
-            .and_then(|asset_status| asset_status.get_asset_mut())
+    pub fn get_mut(&mut self, handle: &AssetHandle<T>) -> &mut AssetEntry<T> {
+        self.store.get_mut(handle.id()).unwrap()
     }
 
     fn handle_load_events(
@@ -303,57 +323,60 @@ where
     ) {
         loop {
             match self.load_channels.receiver.try_recv() {
-                Ok(msg) => {
-                    match self.store.entry(msg.id.clone()) {
-                        Entry::Occupied(entry) => {
-                            match entry.get() {
-                                AssetStatus::Loading => {
-                                    // is already loading do nothing
-                                }
-                                AssetStatus::Loaded(_) => {
-                                    let handle = AssetHandle::new(
-                                        msg.id,
-                                        self.ref_count_channels.sender.clone(),
-                                    );
-
-                                    let event = LoadedAssetEvent::Success { handle };
-
-                                    event_writer.send(event.clone());
-
-                                    if let Some(sender) = msg.reply_sender {
-                                        let _ = sender.send(event);
-                                    }
-                                }
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(AssetStatus::Loading);
-
+                Ok(msg) => match self.store.entry(msg.id.clone()) {
+                    Entry::Occupied(entry) => match entry.get().status {
+                        AssetStatus::Loading => {
                             if let Some(sender) = msg.reply_sender {
                                 self.waiting_for_reply
                                     .entry(msg.id.clone())
                                     .or_default()
                                     .push(sender);
                             }
-
-                            let loaded_sender = self.loaded_channels.sender.clone();
-                            let id = msg.id;
-                            let source = msg.source;
-
-                            #[cfg(not(target_arch = "wasm32"))]
-                            thread_pool.execute(move || {
-                                let asset = source.load();
-                                loaded_sender.send(LoadedAssetMsg { id, asset }).unwrap();
-                            });
-
-                            #[cfg(target_arch = "wasm32")]
-                            thread_pool.execute_async(async move {
-                                let asset = source.load().await;
-                                loaded_sender.send(LoadedAssetMsg { id, asset }).unwrap();
-                            });
                         }
+                        AssetStatus::Loaded => {
+                            let handle =
+                                AssetHandle::new(msg.id, self.ref_count_channels.sender.clone());
+
+                            let event = LoadedAssetEvent::Success { handle };
+
+                            event_writer.send(event.clone());
+
+                            if let Some(sender) = msg.reply_sender {
+                                let _ = sender.send(event);
+                            }
+                        }
+                    },
+                    Entry::Vacant(entry) => {
+                        entry.insert(AssetEntry {
+                            source: msg.source.clone(),
+                            status: AssetStatus::Loading,
+                            asset: None,
+                        });
+
+                        if let Some(sender) = msg.reply_sender {
+                            self.waiting_for_reply
+                                .entry(msg.id.clone())
+                                .or_default()
+                                .push(sender);
+                        }
+
+                        let loaded_sender = self.loaded_channels.sender.clone();
+                        let id = msg.id;
+                        let source = msg.source;
+
+                        #[cfg(not(target_arch = "wasm32"))]
+                        thread_pool.execute(move || {
+                            let asset = source.load();
+                            loaded_sender.send(LoadedAssetMsg { id, asset }).unwrap();
+                        });
+
+                        #[cfg(target_arch = "wasm32")]
+                        thread_pool.execute_async(async move {
+                            let asset = source.load().await;
+                            loaded_sender.send(LoadedAssetMsg { id, asset }).unwrap();
+                        });
                     }
-                }
+                },
                 Err(TryRecvError::Empty) => {
                     break;
                 }
@@ -378,7 +401,10 @@ where
 
                     match msg.asset {
                         Ok(asset) => {
-                            *asset_status_entry.get_mut() = AssetStatus::Loaded(asset);
+                            let entry = asset_status_entry.get_mut();
+                            entry.asset = Some(asset);
+                            entry.status = AssetStatus::Loaded;
+
                             self.ref_counts.insert(msg.id.clone(), 0);
 
                             let event = LoadedAssetEvent::Success {
@@ -449,7 +475,16 @@ where
         }
 
         for id in freed_assets.drain() {
-            self.store.remove(&id);
+            let entry = self.store.remove(&id).unwrap();
+            match entry.status {
+                AssetStatus::Loading => {}
+                AssetStatus::Loaded => {
+                    let asset = entry.asset.unwrap();
+                    if asset.should_save() {
+                        asset.save(entry.source).unwrap(); // TODO
+                    }
+                }
+            }
         }
     }
 }

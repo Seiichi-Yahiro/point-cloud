@@ -4,12 +4,11 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemParam, SystemState};
 use glam::Vec3;
-use rustc_hash::FxHashMap;
 use thousands::Separable;
 
 use point_converter::metadata::Metadata;
 
-use crate::plugins::asset::source::{LoadError, Source};
+use crate::plugins::asset::source::{Directory, IOError, Source};
 use crate::plugins::asset::{
     Asset, AssetHandle, AssetManagerRes, AssetPlugin, LoadAssetMsg, LoadedAssetEvent,
 };
@@ -21,7 +20,7 @@ pub mod shader;
 impl Asset for Metadata {
     type Id = String;
 
-    fn from_reader(reader: &mut dyn Read) -> Result<Self, LoadError> {
+    fn read_from(reader: &mut dyn Read) -> Result<Self, IOError> {
         let result = Metadata::read_from(reader);
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -36,23 +35,18 @@ pub struct MetadataPlugin;
 
 impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            app.insert_resource(Metadatas::default());
-        }
-
         #[cfg(target_arch = "wasm32")]
         {
-            app.insert_non_send_resource(Metadatas::default())
-                .add_systems(
-                    Update,
-                    handle_selection.run_if(in_state(MetadataState::Selecting)),
-                );
+            app.add_systems(
+                Update,
+                handle_selection.run_if(in_state(MetadataState::Selecting)),
+            );
         }
 
         shader::setup(&mut app.world);
 
         app.add_plugins(AssetPlugin::<Metadata>::default())
+            .insert_resource(LoadedMetadata::default())
             .insert_state(MetadataState::NotLoaded)
             .add_systems(
                 Update,
@@ -78,83 +72,59 @@ pub enum MetadataState {
 
 #[derive(Debug)]
 pub struct MetadataEntry {
-    source: Source,
-    handle: Option<AssetHandle<Metadata>>,
+    working_directory: Directory,
+    handle: AssetHandle<Metadata>,
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
-#[derive(Debug, Default)]
-pub struct Metadatas {
-    data: FxHashMap<<Metadata as Asset>::Id, MetadataEntry>,
-    active: Option<<Metadata as Asset>::Id>,
+#[derive(Debug, Default, Resource)]
+pub struct LoadedMetadata {
+    active: Option<AssetHandle<Metadata>>,
 }
-
-impl Metadatas {
-    fn insert_source(&mut self, id: <Metadata as Asset>::Id, source: Source) {
-        self.data.insert(
-            id,
-            MetadataEntry {
-                source,
-                handle: None,
-            },
-        );
-    }
-
-    fn insert_handle(&mut self, handle: AssetHandle<Metadata>) {
-        let metadata_entry = self.data.get_mut(handle.id()).unwrap();
-        metadata_entry.handle = Some(handle);
-    }
-
-    fn set_active(&mut self, key: <Metadata as Asset>::Id) {
-        self.active = Some(key);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub type MetadatasRes<'w> = Res<'w, Metadatas>;
-
-#[cfg(target_arch = "wasm32")]
-pub type MetadatasRes<'w> = NonSend<'w, Metadatas>;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub type MetadatasResMut<'w> = ResMut<'w, Metadatas>;
-
-#[cfg(target_arch = "wasm32")]
-pub type MetadatasResMut<'w> = NonSendMut<'w, Metadatas>;
 
 #[derive(SystemParam)]
 pub struct ActiveMetadata<'w> {
-    metadatas: MetadatasRes<'w>,
+    loaded_metadata: Res<'w, LoadedMetadata>,
     metadata_manager: AssetManagerRes<'w, Metadata>,
 }
 
 impl<'w> ActiveMetadata<'w> {
     pub fn get(&self) -> Option<&Metadata> {
-        self.metadatas
+        self.loaded_metadata
             .active
             .as_ref()
-            .and_then(|id| self.metadata_manager.get(id))
+            .map(|handle| self.metadata_manager.get(handle).asset())
     }
 
-    pub fn get_source(&self) -> Option<&Source> {
-        self.metadatas
+    pub fn get_working_directory(&self) -> Option<Directory> {
+        self.loaded_metadata
             .active
             .as_ref()
-            .and_then(|id| self.metadatas.data.get(id))
-            .map(|entry| &entry.source)
+            .map(|handle| self.metadata_manager.get(handle).source())
+            .and_then(|source| match source {
+                #[cfg(not(target_arch = "wasm32"))]
+                Source::Path(path) => Some(Directory::Path(path.parent().unwrap().to_path_buf())),
+                #[cfg(target_arch = "wasm32")]
+                Source::PathInDirectory { directory, .. } => {
+                    Some(Directory::WebDir(directory.clone()))
+                }
+                Source::URL(_) => {
+                    todo!()
+                }
+                Source::None => None,
+            })
     }
 }
 
 fn receive_metadata(
     mut loaded_metadata_events: EventReader<LoadedAssetEvent<Metadata>>,
     metadata_manager: AssetManagerRes<Metadata>,
-    mut metadatas: MetadatasResMut,
+    mut loaded_metadata: ResMut<LoadedMetadata>,
     mut next_metadata_state: ResMut<NextState<MetadataState>>,
 ) {
     for event in loaded_metadata_events.read() {
         match event {
             LoadedAssetEvent::Success { handle } => {
-                let metadata = metadata_manager.get(handle.id()).unwrap();
+                let metadata = metadata_manager.get(&handle).asset();
 
                 log::debug!(
                     "Loaded metadata for {} with {} points",
@@ -163,8 +133,8 @@ fn receive_metadata(
                 );
 
                 next_metadata_state.set(MetadataState::Loaded);
-                metadatas.set_active(handle.id().clone());
-                metadatas.insert_handle(handle.clone());
+
+                loaded_metadata.active = Some(handle.clone());
             }
             LoadedAssetEvent::Error { id, kind } => {
                 log::error!("Failed to load metadata {}: {:?}", id, kind);
@@ -198,11 +168,7 @@ enum MetadataSelection {
 #[cfg(target_arch = "wasm32")]
 fn handle_selection(
     world: &mut World,
-    params: &mut SystemState<(
-        AssetManagerRes<Metadata>,
-        MetadatasResMut,
-        ResMut<NextState<MetadataState>>,
-    )>,
+    params: &mut SystemState<(AssetManagerRes<Metadata>, ResMut<NextState<MetadataState>>)>,
 ) {
     let receiver = world
         .remove_non_send_resource::<flume::Receiver<MetadataSelection>>()
@@ -210,14 +176,12 @@ fn handle_selection(
 
     match receiver.try_recv() {
         Ok(MetadataSelection::Load(source)) => {
-            let (metadata_manager, mut metadatas, mut metadata_state) = params.get_mut(world);
+            let (metadata_manager, mut metadata_state) = params.get_mut(world);
 
             metadata_state.set(MetadataState::Loading);
 
             let id = format!("{:?}", source);
             log::debug!("{:?}", source); // TODO does this make sense?
-
-            metadatas.insert_source(id.clone(), source.clone());
 
             metadata_manager
                 .load_sender()
@@ -299,10 +263,9 @@ fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
         if let Some(path) = path {
             let mut params = SystemState::<(
                 AssetManagerRes<Metadata>,
-                MetadatasResMut,
                 ResMut<NextState<MetadataState>>,
             )>::new(world);
-            let (metadata_manager, mut metadatas, mut next_metadata_state) = params.get_mut(world);
+            let (metadata_manager, mut next_metadata_state) = params.get_mut(world);
 
             next_metadata_state.set(MetadataState::Loading);
 
@@ -310,8 +273,6 @@ fn select_metadata(ui: &mut egui::Ui, world: &mut World) {
 
             let id = path.to_str().unwrap().to_string();
             let source = Source::Path(path);
-
-            metadatas.insert_source(id.clone(), source.clone());
 
             metadata_manager
                 .load_sender()
