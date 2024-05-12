@@ -217,8 +217,11 @@ fn add_points_to_cell_system(
                                 handle.id()
                             );
 
-                            let cell = cell_manager.get_mut(&handle).asset_mut();
-                            (*handle.id(), add_points_to_cell(&config, task.points, cell))
+                            let mut cell = cell_manager.get_mut(&handle).asset_mut();
+                            (
+                                *handle.id(),
+                                add_points_to_cell(&config, task.points, &mut cell),
+                            )
                         }
                         LoadedAssetEvent::Error { id, kind } => {
                             match kind.as_ref() {

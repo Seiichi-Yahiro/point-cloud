@@ -2,6 +2,7 @@ use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
+use std::ops::{Deref, DerefMut};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -213,7 +214,8 @@ where
     T: Asset,
 {
     source: Source,
-    status: AssetStatus,
+    load_status: AssetLoadStatus,
+    change_status: AssetChangeStatus,
     asset: Option<T>,
 }
 
@@ -225,23 +227,58 @@ where
         self.asset.as_ref().unwrap()
     }
 
-    pub fn asset_mut(&mut self) -> &mut T {
-        self.asset.as_mut().unwrap()
+    pub fn asset_mut(&mut self) -> MutAsset<T> {
+        MutAsset {
+            asset: self.asset.as_mut().unwrap(),
+            change_status: &mut self.change_status,
+        }
     }
 
     pub fn source(&self) -> &Source {
         &self.source
     }
+}
 
-    pub fn status(&self) -> AssetStatus {
-        self.status
+#[derive(Debug)]
+pub struct MutAsset<'a, T>
+where
+    T: Asset,
+{
+    asset: &'a mut T,
+    change_status: &'a mut AssetChangeStatus,
+}
+
+impl<'a, T> Deref for MutAsset<'a, T>
+where
+    T: Asset,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.asset
+    }
+}
+
+impl<'a, T> DerefMut for MutAsset<'a, T>
+where
+    T: Asset,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        *self.change_status = AssetChangeStatus::Changed;
+        self.asset
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum AssetStatus {
+enum AssetLoadStatus {
     Loading,
     Loaded,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+enum AssetChangeStatus {
+    UnChanged,
+    Changed,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
@@ -300,7 +337,8 @@ where
             id.clone(),
             AssetEntry {
                 source,
-                status: AssetStatus::Loaded,
+                load_status: AssetLoadStatus::Loaded,
+                change_status: AssetChangeStatus::Changed,
                 asset: Some(asset),
             },
         );
@@ -324,8 +362,8 @@ where
         loop {
             match self.load_channels.receiver.try_recv() {
                 Ok(msg) => match self.store.entry(msg.id.clone()) {
-                    Entry::Occupied(entry) => match entry.get().status {
-                        AssetStatus::Loading => {
+                    Entry::Occupied(entry) => match entry.get().load_status {
+                        AssetLoadStatus::Loading => {
                             if let Some(sender) = msg.reply_sender {
                                 self.waiting_for_reply
                                     .entry(msg.id.clone())
@@ -333,7 +371,7 @@ where
                                     .push(sender);
                             }
                         }
-                        AssetStatus::Loaded => {
+                        AssetLoadStatus::Loaded => {
                             let handle =
                                 AssetHandle::new(msg.id, self.ref_count_channels.sender.clone());
 
@@ -349,7 +387,8 @@ where
                     Entry::Vacant(entry) => {
                         entry.insert(AssetEntry {
                             source: msg.source.clone(),
-                            status: AssetStatus::Loading,
+                            load_status: AssetLoadStatus::Loading,
+                            change_status: AssetChangeStatus::UnChanged,
                             asset: None,
                         });
 
@@ -403,7 +442,7 @@ where
                         Ok(asset) => {
                             let entry = asset_status_entry.get_mut();
                             entry.asset = Some(asset);
-                            entry.status = AssetStatus::Loaded;
+                            entry.load_status = AssetLoadStatus::Loaded;
 
                             self.ref_counts.insert(msg.id.clone(), 0);
 
@@ -476,12 +515,13 @@ where
 
         for id in freed_assets.drain() {
             let entry = self.store.remove(&id).unwrap();
-            match entry.status {
-                AssetStatus::Loading => {}
-                AssetStatus::Loaded => {
+            match entry.load_status {
+                AssetLoadStatus::Loading => {}
+                AssetLoadStatus::Loaded => {
                     let asset = entry.asset.unwrap();
-                    if asset.should_save() {
-                        asset.save(entry.source).unwrap(); // TODO
+
+                    if asset.should_save() && entry.change_status == AssetChangeStatus::Changed {
+                        asset.save(entry.source).unwrap(); // TODO thread?
                     }
                 }
             }
