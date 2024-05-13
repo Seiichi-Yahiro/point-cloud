@@ -10,8 +10,8 @@ use point_converter::metadata::Metadata;
 
 use crate::plugins::asset::source::{Directory, Source, SourceError};
 use crate::plugins::asset::{
-    Asset, AssetHandle, AssetManagerRes, AssetManagerResMut, AssetPlugin, LoadAssetMsg,
-    LoadedAssetEvent,
+    Asset, AssetEvent, AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetManagerResMut,
+    AssetPlugin, LoadAssetMsg,
 };
 use crate::plugins::camera::Camera;
 use crate::transform::Transform;
@@ -54,9 +54,7 @@ impl Plugin for MetadataPlugin {
             .add_systems(PreStartup, setup)
             .add_systems(
                 Update,
-                receive_metadata
-                    .run_if(in_state(MetadataState::Loading))
-                    .run_if(on_event::<LoadedAssetEvent<Metadata>>()),
+                receive_metadata.run_if(on_event::<AssetEvent<Metadata>>()),
             )
             .add_systems(
                 OnEnter(MetadataState::Loaded),
@@ -89,6 +87,12 @@ pub struct LoadedMetadata {
     active: AssetHandle<Metadata>,
 }
 
+impl LoadedMetadata {
+    pub fn set_active(&mut self, handle: AssetHandle<Metadata>) {
+        self.active = handle;
+    }
+}
+
 #[derive(SystemParam)]
 pub struct ActiveMetadata<'w> {
     loaded_metadata: Res<'w, LoadedMetadata>,
@@ -119,15 +123,16 @@ impl<'w> ActiveMetadata<'w> {
 }
 
 fn receive_metadata(
-    mut loaded_metadata_events: EventReader<LoadedAssetEvent<Metadata>>,
+    mut loaded_metadata_events: EventReader<AssetEvent<Metadata>>,
     metadata_manager: AssetManagerRes<Metadata>,
     mut loaded_metadata: ResMut<LoadedMetadata>,
     mut next_metadata_state: ResMut<NextState<MetadataState>>,
 ) {
     for event in loaded_metadata_events.read() {
         match event {
-            LoadedAssetEvent::Success { handle } => {
-                let metadata = metadata_manager.get(&handle).asset();
+            AssetEvent::Created { handle }
+            | AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
+                let metadata = metadata_manager.get(handle).asset();
 
                 log::debug!(
                     "Loaded metadata for {} with {} points",
@@ -137,10 +142,10 @@ fn receive_metadata(
 
                 next_metadata_state.set(MetadataState::Loaded);
 
-                loaded_metadata.active = handle.clone();
+                loaded_metadata.set_active(handle.clone());
             }
-            LoadedAssetEvent::Error { id, error: kind } => {
-                log::error!("Failed to load metadata {}: {:?}", id, kind);
+            AssetEvent::Loaded(AssetLoadedEvent::Error { id, error }) => {
+                log::error!("Failed to load metadata {}: {:?}", id, error);
                 next_metadata_state.set(MetadataState::NotLoaded);
             }
         }

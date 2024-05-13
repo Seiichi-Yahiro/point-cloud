@@ -33,11 +33,14 @@ where
             app.insert_non_send_resource(AssetManager::<T>::default());
         }
 
-        app.add_event::<LoadedAssetEvent<T>>()
+        app.add_event::<AssetEvent<T>>()
             .add_systems(PreUpdate, handle_loaded_events::<T>)
             .add_systems(
                 PostUpdate,
-                (handle_load_events::<T>, handle_dropped_events::<T>).chain(),
+                (
+                    (handle_load_events::<T>, handle_dropped_events::<T>).chain(),
+                    send_created_events::<T>,
+                ),
             );
     }
 }
@@ -144,7 +147,7 @@ where
 {
     pub id: T::Id,
     pub source: Source,
-    pub reply_sender: Option<Sender<LoadedAssetEvent<T>>>,
+    pub reply_sender: Option<Sender<AssetLoadedEvent<T>>>,
 }
 
 #[derive(Debug)]
@@ -156,8 +159,8 @@ where
     asset: Result<T, SourceError>,
 }
 
-#[derive(Debug, Event)]
-pub enum LoadedAssetEvent<T>
+#[derive(Debug)]
+pub enum AssetLoadedEvent<T>
 where
     T: Asset,
 {
@@ -165,19 +168,42 @@ where
     Error { id: T::Id, error: SourceError },
 }
 
-impl<T> Clone for LoadedAssetEvent<T>
+impl<T> Clone for AssetLoadedEvent<T>
 where
     T: Asset,
 {
     fn clone(&self) -> Self {
         match self {
-            LoadedAssetEvent::Success { handle } => LoadedAssetEvent::Success {
+            Self::Success { handle } => Self::Success {
                 handle: handle.clone(),
             },
-            LoadedAssetEvent::Error { id, error } => LoadedAssetEvent::Error {
+            Self::Error { id, error } => Self::Error {
                 id: id.clone(),
                 error: error.clone(),
             },
+        }
+    }
+}
+
+#[derive(Debug, Event)]
+pub enum AssetEvent<T>
+where
+    T: Asset,
+{
+    Created { handle: AssetHandle<T> },
+    Loaded(AssetLoadedEvent<T>),
+}
+
+impl<T> Clone for AssetEvent<T>
+where
+    T: Asset,
+{
+    fn clone(&self) -> Self {
+        match self {
+            AssetEvent::Created { handle } => AssetEvent::Created {
+                handle: handle.clone(),
+            },
+            AssetEvent::Loaded(loaded) => AssetEvent::Loaded(loaded.clone()),
         }
     }
 }
@@ -284,11 +310,12 @@ where
     T: Asset,
 {
     store: FxHashMap<T::Id, AssetEntry<T>>,
+    just_created: Vec<AssetHandle<T>>,
     load_channels: Channels<LoadAssetMsg<T>>,
     loaded_channels: Channels<LoadedAssetMsg<T>>,
     ref_count_channels: Channels<ChangeRefCount<T::Id>>,
     ref_counts: FxHashMap<T::Id, u32>,
-    waiting_for_reply: FxHashMap<T::Id, Vec<Sender<LoadedAssetEvent<T>>>>,
+    waiting_for_reply: FxHashMap<T::Id, Vec<Sender<AssetLoadedEvent<T>>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -310,6 +337,7 @@ where
     fn default() -> Self {
         Self {
             store: FxHashMap::default(),
+            just_created: Vec::default(),
             load_channels: Channels::default(),
             loaded_channels: Channels::default(),
             ref_count_channels: Channels::default(),
@@ -338,8 +366,14 @@ where
                 asset: Some(asset),
             },
         );
+
         self.ref_counts.insert(id.clone(), 0);
-        AssetHandle::new(id, self.ref_count_channels.sender.clone())
+
+        let handle = AssetHandle::new(id, self.ref_count_channels.sender.clone());
+
+        self.just_created.push(handle.clone());
+
+        handle
     }
 
     pub fn get(&self, handle: &AssetHandle<T>) -> &AssetEntry<T> {
@@ -352,7 +386,7 @@ where
 
     fn handle_load_events(
         &mut self,
-        event_writer: &mut EventWriter<LoadedAssetEvent<T>>,
+        event_writer: &mut EventWriter<AssetEvent<T>>,
         thread_pool: &ThreadPool,
     ) {
         loop {
@@ -371,12 +405,11 @@ where
                             let handle =
                                 AssetHandle::new(msg.id, self.ref_count_channels.sender.clone());
 
-                            let event = LoadedAssetEvent::Success { handle };
-
-                            event_writer.send(event.clone());
+                            let asset_loaded_event = AssetLoadedEvent::Success { handle };
+                            event_writer.send(AssetEvent::Loaded(asset_loaded_event.clone()));
 
                             if let Some(sender) = msg.reply_sender {
-                                let _ = sender.send(event);
+                                let _ = sender.send(asset_loaded_event);
                             }
                         }
                     },
@@ -422,7 +455,7 @@ where
         }
     }
 
-    fn handle_loaded_events(&mut self, event_writer: &mut EventWriter<LoadedAssetEvent<T>>) {
+    fn handle_loaded_events(&mut self, event_writer: &mut EventWriter<AssetEvent<T>>) {
         loop {
             match self.loaded_channels.receiver.try_recv() {
                 Ok(msg) => {
@@ -442,32 +475,32 @@ where
 
                             self.ref_counts.insert(msg.id.clone(), 0);
 
-                            let event = LoadedAssetEvent::Success {
+                            let asset_loaded_event = AssetLoadedEvent::Success {
                                 handle: AssetHandle::new(
                                     msg.id.clone(),
                                     self.ref_count_channels.sender.clone(),
                                 ),
                             };
 
-                            event_writer.send(event.clone());
-
                             for sender in waiting_for_reply {
-                                let _ = sender.send(event.clone());
+                                let _ = sender.send(asset_loaded_event.clone());
                             }
+
+                            event_writer.send(AssetEvent::Loaded(asset_loaded_event));
                         }
                         Err(err) => {
                             asset_status_entry.remove();
 
-                            let event = LoadedAssetEvent::Error {
+                            let asset_loaded_event = AssetLoadedEvent::Error {
                                 id: msg.id.clone(),
                                 error: err.into(),
                             };
 
-                            event_writer.send(event.clone());
-
                             for sender in waiting_for_reply {
-                                let _ = sender.send(event.clone());
+                                let _ = sender.send(asset_loaded_event.clone());
                             }
+
+                            event_writer.send(AssetEvent::Loaded(asset_loaded_event));
                         }
                     }
                 }
@@ -478,6 +511,12 @@ where
                     unreachable!("self always holds a sender")
                 }
             }
+        }
+    }
+
+    fn send_created_events(&mut self, event_writer: &mut EventWriter<AssetEvent<T>>) {
+        for handle in self.just_created.drain(..) {
+            event_writer.send(AssetEvent::Created { handle });
         }
     }
 
@@ -527,17 +566,24 @@ where
 
 fn handle_load_events<T: Asset>(
     mut asset_manager: AssetManagerResMut<T>,
-    mut loaded_asset_events: EventWriter<LoadedAssetEvent<T>>,
+    mut asset_events: EventWriter<AssetEvent<T>>,
     thread_pool: ThreadPoolRes,
 ) {
-    asset_manager.handle_load_events(&mut loaded_asset_events, &thread_pool);
+    asset_manager.handle_load_events(&mut asset_events, &thread_pool);
 }
 
 fn handle_loaded_events<T: Asset>(
     mut asset_manager: AssetManagerResMut<T>,
-    mut loaded_asset_events: EventWriter<LoadedAssetEvent<T>>,
+    mut asset_events: EventWriter<AssetEvent<T>>,
 ) {
-    asset_manager.handle_loaded_events(&mut loaded_asset_events);
+    asset_manager.handle_loaded_events(&mut asset_events);
+}
+
+fn send_created_events<T: Asset>(
+    mut asset_manager: AssetManagerResMut<T>,
+    mut asset_events: EventWriter<AssetEvent<T>>,
+) {
+    asset_manager.send_created_events(&mut asset_events);
 }
 
 fn handle_dropped_events<T: Asset>(mut asset_manager: AssetManagerResMut<T>) {

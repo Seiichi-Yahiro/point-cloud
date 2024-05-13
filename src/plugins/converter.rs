@@ -14,7 +14,7 @@ use point_converter::metadata::{Metadata, MetadataConfig};
 use point_converter::point::Point;
 
 use crate::plugins::asset::source::{Directory, SourceError};
-use crate::plugins::asset::{AssetManagerRes, AssetManagerResMut, LoadAssetMsg, LoadedAssetEvent};
+use crate::plugins::asset::{AssetLoadedEvent, AssetManagerRes, AssetManagerResMut, LoadAssetMsg};
 use crate::plugins::thread_pool::ThreadPool;
 
 pub struct ConverterPlugin;
@@ -134,7 +134,7 @@ fn get_point_batch(
 #[derive(Debug)]
 struct CellTask {
     points: Vec<Point>,
-    loaded_asset_receiver: Receiver<LoadedAssetEvent<Cell>>,
+    loaded_asset_receiver: Receiver<AssetLoadedEvent<Cell>>,
 }
 
 impl CellTask {
@@ -210,7 +210,7 @@ fn add_points_to_cell_system(
             match task.loaded_asset_receiver.try_recv() {
                 Ok(loaded_asset_event) => {
                     let (id, remaining_points) = match loaded_asset_event {
-                        LoadedAssetEvent::Success { handle } => {
+                        AssetLoadedEvent::Success { handle } => {
                             log::debug!(
                                 "Adding {} points to loaded cell {:?}",
                                 task.points.len(),
@@ -223,7 +223,7 @@ fn add_points_to_cell_system(
                                 add_points_to_cell(&config, task.points, &mut cell),
                             )
                         }
-                        LoadedAssetEvent::Error { id, error } => {
+                        AssetLoadedEvent::Error { id, error } => {
                             match error {
                                 SourceError::NotFound(_) => {
                                     // OK

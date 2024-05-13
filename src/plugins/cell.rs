@@ -18,7 +18,7 @@ use point_converter::metadata::MetadataConfig;
 
 use crate::plugins::asset::source::SourceError;
 use crate::plugins::asset::{
-    Asset, AssetHandle, AssetManagerRes, AssetPlugin, LoadAssetMsg, LoadedAssetEvent,
+    Asset, AssetEvent, AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetPlugin, LoadAssetMsg,
 };
 use crate::plugins::camera::frustum::Aabb;
 use crate::plugins::camera::projection::PerspectiveProjection;
@@ -279,16 +279,19 @@ impl CellBundle {
 fn receive_cell(
     mut commands: Commands,
     cell_manager: AssetManagerRes<Cell>,
-    mut loaded_assets_events: EventReader<LoadedAssetEvent<Cell>>,
+    mut assets_events: EventReader<AssetEvent<Cell>>,
     device: Res<Device>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
     mut loaded_cells: ResMut<LoadedCells>,
-    mut missing_cells: ResMut<MissingCells>, // TODO move missing into manager?
+    mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
 ) {
-    for event in loaded_assets_events.read() {
+    for event in assets_events.read() {
         match event {
-            LoadedAssetEvent::Success { handle } => {
+            AssetEvent::Created { handle } => {
+                missing_cells.0.remove(handle.id());
+            }
+            AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
                 let id = handle.id();
 
                 if !loading_cells.loading.remove(id) {
@@ -306,8 +309,10 @@ fn receive_cell(
 
                 loaded_cells.0.insert(*id, entity);
             }
-            LoadedAssetEvent::Error { id, error } => {
-                loading_cells.loading.remove(id);
+            AssetEvent::Loaded(AssetLoadedEvent::Error { id, error }) => {
+                if !loading_cells.loading.remove(id) {
+                    continue;
+                }
 
                 match error {
                     SourceError::NotFound(_) => {
