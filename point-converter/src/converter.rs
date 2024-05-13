@@ -188,7 +188,7 @@ impl Converter {
     fn load_cell(&self, cell_path: &Path) -> Result<Cell, std::io::Error> {
         std::fs::read(cell_path).and_then(|bytes| {
             let mut cursor = Cursor::new(bytes);
-            Cell::read_from(&mut cursor, &self.metadata.config)
+            Cell::read_from(&mut cursor)
         })
     }
 
@@ -199,7 +199,13 @@ impl Converter {
                 ErrorKind::NotFound => {
                     let cell_size = self.metadata.config.cell_size(id.hierarchy);
                     let cell_pos = self.metadata.config.cell_pos(id.index, cell_size);
-                    Cell::new(id, cell_size, cell_pos, 50_000)
+                    Cell::new(
+                        id,
+                        self.metadata.config.sub_grid_dimension,
+                        cell_size,
+                        cell_pos,
+                        50_000,
+                    )
                 }
                 _ => {
                     panic!("{:?}", err);

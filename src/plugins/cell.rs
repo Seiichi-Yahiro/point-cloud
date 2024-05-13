@@ -14,7 +14,6 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
 
 use point_converter::cell::{Cell, CellId};
-use point_converter::metadata::MetadataConfig;
 
 use crate::plugins::asset::source::SourceError;
 use crate::plugins::asset::{
@@ -37,8 +36,7 @@ impl Asset for Cell {
     type Id = CellId;
 
     fn read_from(reader: &mut dyn Read) -> Result<Self, SourceError> {
-        // TODO config
-        Cell::read_from(reader, &MetadataConfig::default()).map_err(SourceError::from)
+        Cell::read_from(reader).map_err(SourceError::from)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

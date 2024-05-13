@@ -41,9 +41,9 @@ pub struct Cell {
 impl Cell {
     pub const EXTENSION: &'static str = "bin";
 
-    pub fn new(id: CellId, size: f32, pos: Vec3, capacity: usize) -> Self {
+    pub fn new(id: CellId, sub_grid_dimension: u32, size: f32, pos: Vec3, capacity: usize) -> Self {
         Self {
-            header: Header::new(id, size, pos),
+            header: Header::new(id, sub_grid_dimension, size, pos),
             points: Vec::with_capacity(capacity),
             points_grid: FxHashSet::with_capacity_and_hasher(
                 capacity,
@@ -175,10 +175,7 @@ impl Cell {
         Ok(())
     }
 
-    pub fn read_from(
-        reader: &mut dyn Read,
-        config: &MetadataConfig,
-    ) -> Result<Self, std::io::Error> {
+    pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
         let header = Header::read_from(reader)?;
 
         let mut points = Vec::with_capacity(header.number_of_points as usize);
@@ -191,7 +188,7 @@ impl Cell {
         for _ in 0..header.number_of_points {
             let point = Point::read_from(reader)?;
 
-            let sub_grid_index = header.sub_grid_index_for_point(point, config.sub_grid_dimension);
+            let sub_grid_index = header.sub_grid_index_for_point(point, header.sub_grid_dimension);
 
             points_grid.insert(sub_grid_index);
             points.push(point);
@@ -233,13 +230,10 @@ impl Cell {
         })
     }
 
-    pub fn from_path<T: AsRef<Path>>(
-        path: T,
-        config: &MetadataConfig,
-    ) -> Result<Self, std::io::Error> {
+    pub fn from_path<T: AsRef<Path>>(path: T) -> Result<Self, std::io::Error> {
         let file = std::fs::File::open(path)?;
         let mut buf_reader = std::io::BufReader::new(file);
-        Self::read_from(&mut buf_reader, config)
+        Self::read_from(&mut buf_reader)
     }
 }
 
@@ -251,9 +245,14 @@ pub struct Header {
     /// Number of points in this cell.
     pub total_number_of_points: u32,
 
+    /// Number of points.
     pub number_of_points: u32,
 
+    /// Number of overflowing points which would belong to the next hierarchy.
     pub number_of_overflow_points: u32,
+
+    /// Inner sub grid. [sub_grid_dimension]^3 is the number of points a cell can hold.
+    pub sub_grid_dimension: u32,
 
     /// The side length of the cubic cell.
     pub size: f32,
@@ -264,12 +263,13 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn new(id: CellId, size: f32, pos: Vec3) -> Self {
+    pub fn new(id: CellId, sub_grid_dimension: u32, size: f32, pos: Vec3) -> Self {
         Self {
             id,
             total_number_of_points: 0,
             number_of_points: 0,
             number_of_overflow_points: 0,
+            sub_grid_dimension,
             size,
             pos,
         }
@@ -298,6 +298,7 @@ impl Header {
         writer.write_u32::<Endianess>(self.number_of_points)?;
         writer.write_u32::<Endianess>(self.number_of_overflow_points)?;
 
+        writer.write_u32::<Endianess>(self.sub_grid_dimension)?;
         writer.write_f32::<Endianess>(self.size)?;
 
         writer.write_f32::<Endianess>(self.pos.x)?;
@@ -323,6 +324,7 @@ impl Header {
         let number_of_points = reader.read_u32::<Endianess>()?;
         let number_of_overflow_points = reader.read_u32::<Endianess>()?;
 
+        let sub_grid_dimension = reader.read_u32::<Endianess>()?;
         let size = reader.read_f32::<Endianess>()?;
 
         let pos = {
@@ -337,6 +339,7 @@ impl Header {
             total_number_of_points,
             number_of_points,
             number_of_overflow_points,
+            sub_grid_dimension,
             size,
             pos,
         })

@@ -17,7 +17,6 @@ impl BatchedPointCloudPointReader {
         match Metadata::from_path(path.as_ref()) {
             Ok(metadata) => {
                 let working_directory = path.as_ref().parent().unwrap().to_path_buf();
-                let config = metadata.config.clone();
 
                 let point_iterator = (0..metadata.hierarchies)
                     .map(move |hierarchy| {
@@ -39,7 +38,7 @@ impl BatchedPointCloudPointReader {
                             None
                         }
                     })
-                    .map(move |cell_path| Cell::from_path(cell_path, &config))
+                    .map(Cell::from_path)
                     .filter_map(|cell_result| match cell_result {
                         Ok(cell) => Some(cell),
                         Err(err) => {

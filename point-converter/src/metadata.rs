@@ -71,7 +71,6 @@ pub struct MetadataConfig {
     pub cell_point_overflow_limit: u32,
 
     /// [sub_grid_dimension]^3 is the number of points a cell can hold.
-    /// Doesn't count for minimum sized cells of the lowest hierarchy level.
     pub sub_grid_dimension: u32,
 
     /// Size of the largest cell of the largest hierarchy level.

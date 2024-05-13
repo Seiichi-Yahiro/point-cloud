@@ -239,7 +239,13 @@ fn add_points_to_cell_system(
 
                             let cell_size = config.cell_size(id.hierarchy);
                             let cell_pos = config.cell_pos(id.index, cell_size);
-                            let mut cell = Cell::new(id, cell_size, cell_pos, 10_000);
+                            let mut cell = Cell::new(
+                                id,
+                                config.sub_grid_dimension,
+                                cell_size,
+                                cell_pos,
+                                10_000,
+                            );
 
                             let remaining_points =
                                 add_points_to_cell(&config, task.points, &mut cell);
