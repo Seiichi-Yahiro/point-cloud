@@ -9,7 +9,7 @@ use bevy_ecs::prelude::*;
 use flume::{Receiver, Sender, TryRecvError};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::plugins::asset::source::{IOError, IOErrorKind, Source};
+use crate::plugins::asset::source::{Source, SourceError};
 use crate::plugins::thread_pool::{ThreadPool, ThreadPoolRes};
 
 pub mod source;
@@ -54,9 +54,9 @@ where
 pub trait Asset: Send + Sync + Sized + 'static {
     type Id: Debug + Eq + Hash + Clone + Send + Sync;
 
-    fn read_from(reader: &mut dyn Read) -> Result<Self, IOError>;
+    fn read_from(reader: &mut dyn Read) -> Result<Self, SourceError>;
 
-    fn save(&self, _source: Source) -> Result<(), IOError> {
+    fn save(&self, _source: Source) -> Result<(), SourceError> {
         Ok(())
     }
 }
@@ -153,7 +153,7 @@ where
     T: Asset,
 {
     id: T::Id,
-    asset: Result<T, IOError>,
+    asset: Result<T, SourceError>,
 }
 
 #[derive(Debug, Event)]
@@ -162,7 +162,7 @@ where
     T: Asset,
 {
     Success { handle: AssetHandle<T> },
-    Error { id: T::Id, kind: IOErrorKind },
+    Error { id: T::Id, error: SourceError },
 }
 
 impl<T> Clone for LoadedAssetEvent<T>
@@ -174,9 +174,9 @@ where
             LoadedAssetEvent::Success { handle } => LoadedAssetEvent::Success {
                 handle: handle.clone(),
             },
-            LoadedAssetEvent::Error { id, kind } => LoadedAssetEvent::Error {
+            LoadedAssetEvent::Error { id, error } => LoadedAssetEvent::Error {
                 id: id.clone(),
-                kind: kind.clone(),
+                error: error.clone(),
             },
         }
     }
@@ -460,7 +460,7 @@ where
 
                             let event = LoadedAssetEvent::Error {
                                 id: msg.id.clone(),
-                                kind: err.into(),
+                                error: err.into(),
                             };
 
                             event_writer.send(event.clone());

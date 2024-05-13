@@ -1,4 +1,73 @@
 use crate::plugins::asset::Asset;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+
+#[derive(Debug, Clone)]
+pub enum SourceError {
+    NotFound(String),
+    NoSource,
+    #[cfg(target_arch = "wasm32")]
+    InvalidPath(String),
+    Other {
+        message: String,
+        #[cfg(not(target_arch = "wasm32"))]
+        name: std::io::ErrorKind,
+        #[cfg(target_arch = "wasm32")]
+        name: String,
+    },
+}
+
+impl From<std::io::Error> for SourceError {
+    fn from(value: std::io::Error) -> Self {
+        match value.kind() {
+            std::io::ErrorKind::NotFound => Self::NotFound(value.to_string()),
+            _ => Self::Other {
+                message: value.to_string(),
+                #[cfg(not(target_arch = "wasm32"))]
+                name: value.kind(),
+                #[cfg(target_arch = "wasm32")]
+                name: value.kind().to_string(),
+            },
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl From<wasm_bindgen::JsValue> for SourceError {
+    fn from(value: wasm_bindgen::JsValue) -> Self {
+        js_sys::Error::from(value).into()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl From<js_sys::Error> for SourceError {
+    fn from(value: js_sys::Error) -> Self {
+        let name = value.name().as_string().unwrap();
+
+        match name.as_str() {
+            "NotFoundError" => Self::NotFound(value.message().as_string().unwrap()),
+            _ => Self::Other {
+                message: value.message().as_string().unwrap(),
+                name,
+            },
+        }
+    }
+}
+
+impl Display for SourceError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let msg = match self {
+            SourceError::NotFound(msg) => msg,
+            #[cfg(target_arch = "wasm32")]
+            SourceError::InvalidPath(msg) => msg,
+            SourceError::NoSource => "no source provided",
+            SourceError::Other { message, .. } => message,
+        };
+
+        write!(f, "{}", msg)
+    }
+}
+impl Error for SourceError {}
 
 #[derive(Debug, Clone)]
 pub enum Directory {
@@ -26,47 +95,6 @@ impl Directory {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub type IOError = std::io::Error;
-
-#[cfg(target_arch = "wasm32")]
-pub type IOError = js_sys::Error;
-
-#[derive(Debug, Clone)]
-pub struct IOErrorKind {
-    #[cfg(not(target_arch = "wasm32"))]
-    kind: std::io::ErrorKind,
-
-    #[cfg(target_arch = "wasm32")]
-    kind: String,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl AsRef<std::io::ErrorKind> for IOErrorKind {
-    fn as_ref(&self) -> &std::io::ErrorKind {
-        &self.kind
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl AsRef<str> for IOErrorKind {
-    fn as_ref(&self) -> &str {
-        &self.kind
-    }
-}
-
-impl From<IOError> for IOErrorKind {
-    fn from(error: IOError) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
-        return Self { kind: error.kind() };
-
-        #[cfg(target_arch = "wasm32")]
-        return Self {
-            kind: error.name().as_string().unwrap(),
-        };
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Source {
     #[cfg(not(target_arch = "wasm32"))]
@@ -85,7 +113,7 @@ pub enum Source {
 
 impl Source {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn load<T: Asset>(&self) -> Result<T, IOError> {
+    pub fn load<T: Asset>(&self) -> Result<T, SourceError> {
         match self {
             Source::Path(path) => {
                 let file = std::fs::File::open(path)?;
@@ -95,19 +123,15 @@ impl Source {
             Source::URL(_) => {
                 todo!()
             }
-            Source::None => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "No source provided to load from",
-            )),
+            Source::None => Err(SourceError::NoSource),
         }
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn load<T: Asset>(&self) -> Result<T, IOError> {
+    pub async fn load<T: Asset>(&self) -> Result<T, SourceError> {
         match self {
             Source::PathInDirectory { directory, path } => {
                 use std::path::Component;
-                use wasm_bindgen::JsValue;
 
                 let mut dir = directory.clone();
 
@@ -116,9 +140,9 @@ impl Source {
                 for (i, component) in components.iter().enumerate() {
                     match component {
                         Component::Prefix(_) | Component::ParentDir => {
-                            let error = js_sys::Error::new("Failed to parse path");
-                            error.set_cause(&JsValue::from_str("UnsupportedPath"));
-                            return Err(error);
+                            return Err(SourceError::InvalidPath(
+                                path.to_str().unwrap().to_string(),
+                            ));
                         }
                         Component::RootDir | Component::CurDir => {
                             continue;
@@ -139,18 +163,12 @@ impl Source {
                     }
                 }
 
-                let error = js_sys::Error::new("Failed to parse path");
-                error.set_cause(&JsValue::from_str("UnsupportedPath"));
-                Err(error)
+                Err(SourceError::InvalidPath(path.to_str().unwrap().to_string()))
             }
             Source::URL(_) => {
                 todo!()
             }
-            Source::None => {
-                let js_error = js_sys::Error::new("No source provided to load from");
-                js_error.set_cause(&wasm_bindgen::JsValue::from("Unsupported"));
-                Err(js_error)
-            }
+            Source::None => Err(SourceError::NoSource),
         }
     }
 }

@@ -8,7 +8,7 @@ use thousands::Separable;
 
 use point_converter::metadata::Metadata;
 
-use crate::plugins::asset::source::{Directory, IOError, Source};
+use crate::plugins::asset::source::{Directory, Source, SourceError};
 use crate::plugins::asset::{
     Asset, AssetHandle, AssetManagerRes, AssetManagerResMut, AssetPlugin, LoadAssetMsg,
     LoadedAssetEvent,
@@ -21,14 +21,17 @@ pub mod shader;
 impl Asset for Metadata {
     type Id = String;
 
-    fn read_from(reader: &mut dyn Read) -> Result<Self, IOError> {
+    fn read_from(reader: &mut dyn Read) -> Result<Self, SourceError> {
         let result = Metadata::read_from(reader);
+        let kind = std::io::ErrorKind::InvalidData;
 
-        #[cfg(not(target_arch = "wasm32"))]
-        return result.map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err));
-
-        #[cfg(target_arch = "wasm32")]
-        return result.map_err(|err| js_sys::Error::new(&err.to_string()));
+        result.map_err(|err| SourceError::Other {
+            message: err.to_string(),
+            #[cfg(not(target_arch = "wasm32"))]
+            name: kind,
+            #[cfg(target_arch = "wasm32")]
+            name: kind.to_string(),
+        })
     }
 }
 
@@ -136,7 +139,7 @@ fn receive_metadata(
 
                 loaded_metadata.active = handle.clone();
             }
-            LoadedAssetEvent::Error { id, kind } => {
+            LoadedAssetEvent::Error { id, error: kind } => {
                 log::error!("Failed to load metadata {}: {:?}", id, kind);
                 next_metadata_state.set(MetadataState::NotLoaded);
             }

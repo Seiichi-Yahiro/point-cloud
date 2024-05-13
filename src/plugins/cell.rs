@@ -16,7 +16,7 @@ use thousands::Separable;
 use point_converter::cell::{Cell, CellId};
 use point_converter::metadata::MetadataConfig;
 
-use crate::plugins::asset::source::IOError;
+use crate::plugins::asset::source::SourceError;
 use crate::plugins::asset::{
     Asset, AssetHandle, AssetManagerRes, AssetPlugin, LoadAssetMsg, LoadedAssetEvent,
 };
@@ -36,25 +36,13 @@ pub mod shader;
 impl Asset for Cell {
     type Id = CellId;
 
-    fn read_from(reader: &mut dyn Read) -> Result<Self, IOError> {
+    fn read_from(reader: &mut dyn Read) -> Result<Self, SourceError> {
         // TODO config
-        let result = Cell::read_from(reader, &MetadataConfig::default());
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            return result.map_err(|err| {
-                let js_error = js_sys::Error::new(&err.to_string());
-                js_error.set_cause(&wasm_bindgen::JsValue::from(err.kind().to_string()));
-                js_error
-            });
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        return result;
+        Cell::read_from(reader, &MetadataConfig::default()).map_err(SourceError::from)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn save(&self, source: crate::plugins::asset::source::Source) -> Result<(), IOError> {
+    fn save(&self, source: crate::plugins::asset::source::Source) -> Result<(), SourceError> {
         use crate::plugins::asset::source::Source;
         use std::fs::{create_dir, File};
         use std::io::{BufWriter, ErrorKind, Write};
@@ -67,7 +55,7 @@ impl Asset for Cell {
                     match err.kind() {
                         ErrorKind::AlreadyExists => {}
                         _ => {
-                            return Err(err);
+                            return Err(err.into());
                         }
                     }
                 }
@@ -75,7 +63,7 @@ impl Asset for Cell {
                 let file = File::create(path)?;
                 let mut buf_writer = BufWriter::new(file);
                 self.write_to(&mut buf_writer)?;
-                buf_writer.flush()
+                buf_writer.flush().map_err(SourceError::from)
             }
             Source::URL(_) => {
                 todo!()
@@ -318,23 +306,17 @@ fn receive_cell(
 
                 loaded_cells.0.insert(*id, entity);
             }
-            LoadedAssetEvent::Error { id, kind } => {
+            LoadedAssetEvent::Error { id, error } => {
                 loading_cells.loading.remove(id);
 
-                match kind.as_ref() {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    std::io::ErrorKind::NotFound => {
-                        log::debug!("Cell is missing: {:?}", id);
-                        missing_cells.0.put(*id, ());
-                    }
-                    #[cfg(target_arch = "wasm32")]
-                    "NotFoundError" => {
+                match error {
+                    SourceError::NotFound(_) => {
                         log::debug!("Cell is missing: {:?}", id);
                         missing_cells.0.put(*id, ());
                     }
                     _ => {
                         // TODO do something with the failed cell
-                        log::error!("Failed to load cell {:?}: {:?}", id, kind);
+                        log::error!("Failed to load cell {:?}: {:?}", id, error);
                     }
                 }
             }

@@ -13,7 +13,7 @@ use point_converter::converter::{add_points_to_cell, group_points};
 use point_converter::metadata::{Metadata, MetadataConfig};
 use point_converter::point::Point;
 
-use crate::plugins::asset::source::Directory;
+use crate::plugins::asset::source::{Directory, SourceError};
 use crate::plugins::asset::{AssetManagerRes, AssetManagerResMut, LoadAssetMsg, LoadedAssetEvent};
 use crate::plugins::thread_pool::ThreadPool;
 
@@ -223,19 +223,14 @@ fn add_points_to_cell_system(
                                 add_points_to_cell(&config, task.points, &mut cell),
                             )
                         }
-                        LoadedAssetEvent::Error { id, kind } => {
-                            match kind.as_ref() {
-                                #[cfg(not(target_arch = "wasm32"))]
-                                std::io::ErrorKind::NotFound => {
-                                    // OK
-                                }
-                                #[cfg(target_arch = "wasm32")]
-                                "NotFoundError" => {
+                        LoadedAssetEvent::Error { id, error } => {
+                            match error {
+                                SourceError::NotFound(_) => {
                                     // OK
                                 }
                                 _ => {
                                     // TODO do something with the failed cell
-                                    log::error!("Failed to load cell {:?}: {:?}", id, kind);
+                                    log::error!("Failed to load cell {:?}: {:?}", id, error);
                                     continue;
                                 }
                             }
