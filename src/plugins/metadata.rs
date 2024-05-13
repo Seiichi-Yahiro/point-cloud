@@ -11,7 +11,7 @@ use point_converter::metadata::Metadata;
 use crate::plugins::asset::source::{Directory, Source, SourceError};
 use crate::plugins::asset::{
     Asset, AssetEvent, AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetManagerResMut,
-    AssetPlugin, LoadAssetMsg,
+    AssetPlugin, LoadAssetMsg, MutAsset,
 };
 use crate::plugins::camera::Camera;
 use crate::transform::Transform;
@@ -99,6 +99,25 @@ pub struct ActiveMetadata<'w> {
     metadata_manager: AssetManagerRes<'w, Metadata>,
 }
 
+#[derive(SystemParam)]
+pub struct ActiveMetadataMut<'w> {
+    loaded_metadata: Res<'w, LoadedMetadata>,
+    metadata_manager: AssetManagerResMut<'w, Metadata>,
+}
+
+fn get_working_directory(source: &Source) -> Option<Directory> {
+    match source {
+        #[cfg(not(target_arch = "wasm32"))]
+        Source::Path(path) => Some(Directory::Path(path.parent().unwrap().to_path_buf())),
+        #[cfg(target_arch = "wasm32")]
+        Source::PathInDirectory { directory, .. } => Some(Directory::WebDir(directory.clone())),
+        Source::URL(_) => {
+            todo!()
+        }
+        Source::None => None,
+    }
+}
+
 impl<'w> ActiveMetadata<'w> {
     pub fn get(&self) -> &Metadata {
         let handle = &self.loaded_metadata.active;
@@ -108,17 +127,20 @@ impl<'w> ActiveMetadata<'w> {
     pub fn get_working_directory(&self) -> Option<Directory> {
         let handle = &self.loaded_metadata.active;
         let source = self.metadata_manager.get(handle).source();
+        get_working_directory(source)
+    }
+}
 
-        match source {
-            #[cfg(not(target_arch = "wasm32"))]
-            Source::Path(path) => Some(Directory::Path(path.parent().unwrap().to_path_buf())),
-            #[cfg(target_arch = "wasm32")]
-            Source::PathInDirectory { directory, .. } => Some(Directory::WebDir(directory.clone())),
-            Source::URL(_) => {
-                todo!()
-            }
-            Source::None => None,
-        }
+impl<'w> ActiveMetadataMut<'w> {
+    pub fn get_mut(&mut self) -> MutAsset<Metadata> {
+        let handle = &self.loaded_metadata.active;
+        self.metadata_manager.get_mut(handle).asset_mut()
+    }
+
+    pub fn get_working_directory(&self) -> Option<Directory> {
+        let handle = &self.loaded_metadata.active;
+        let source = self.metadata_manager.get(handle).source();
+        get_working_directory(source)
     }
 }
 

@@ -15,7 +15,7 @@ use point_converter::point::Point;
 
 use crate::plugins::asset::source::{Directory, Source, SourceError};
 use crate::plugins::asset::{AssetLoadedEvent, AssetManagerRes, AssetManagerResMut, LoadAssetMsg};
-use crate::plugins::metadata::{ActiveMetadata, MetadataState};
+use crate::plugins::metadata::{ActiveMetadata, ActiveMetadataMut, MetadataState};
 use crate::plugins::thread_pool::ThreadPool;
 
 pub struct ConverterPlugin;
@@ -199,29 +199,17 @@ fn receive_cell_tasks(mut cell_tasks: ResMut<CellTasks>) {
 fn add_points_to_cell_system(
     mut cell_manager: AssetManagerResMut<Cell>,
     mut cell_tasks: ResMut<CellTasks>,
-    active_metadata: ActiveMetadata,
+    mut active_metadata: ActiveMetadataMut,
 ) {
+    let working_directory = active_metadata.get_working_directory();
+    let mut metadata = active_metadata.get_mut();
+
     for _ in 0..cell_tasks.tasks.len().min(10) {
         if let Some(task) = cell_tasks.tasks.pop_front() {
-            let config = &active_metadata.get().config;
-            let working_directory = active_metadata.get_working_directory();
-
             match task.loaded_asset_receiver.try_recv() {
                 Ok(loaded_asset_event) => {
-                    let (id, remaining_points) = match loaded_asset_event {
-                        AssetLoadedEvent::Success { handle } => {
-                            log::debug!(
-                                "Adding {} points to loaded cell {:?}",
-                                task.points.len(),
-                                handle.id()
-                            );
-
-                            let mut cell = cell_manager.get_mut(&handle).asset_mut();
-                            (
-                                *handle.id(),
-                                add_points_to_cell(config, task.points, &mut cell),
-                            )
-                        }
+                    let handle = match loaded_asset_event {
+                        AssetLoadedEvent::Success { handle } => handle,
                         AssetLoadedEvent::Error { id, error } => {
                             match error {
                                 SourceError::NotFound(_) | SourceError::NoSource => {
@@ -234,34 +222,42 @@ fn add_points_to_cell_system(
                                 }
                             }
 
-                            log::debug!("Adding {} points to new cell {:?}", task.points.len(), id);
+                            log::debug!("Creating new cell {:?}", id);
 
-                            let cell_size = config.cell_size(id.hierarchy);
-                            let cell_pos = config.cell_pos(id.index, cell_size);
-                            let mut cell = Cell::new(
+                            let cell_size = metadata.config.cell_size(id.hierarchy);
+                            let cell_pos = metadata.config.cell_pos(id.index, cell_size);
+                            let cell = Cell::new(
                                 id,
-                                config.sub_grid_dimension,
+                                metadata.config.sub_grid_dimension,
                                 cell_size,
                                 cell_pos,
                                 10_000,
                             );
 
-                            let remaining_points =
-                                add_points_to_cell(config, task.points, &mut cell);
-
                             let source = working_directory
                                 .as_ref()
                                 .map_or(Source::None, |dir| dir.join(&id.path()));
 
-                            let _handle = cell_manager.insert(id, cell, source); // TODO save handle?
-
-                            (id, remaining_points)
+                            cell_manager.insert(id, cell, source)
                         }
                     };
 
+                    let mut cell = cell_manager.get_mut(&handle).asset_mut();
+                    let points_before = cell.header().total_number_of_points;
+
+                    let remaining_points =
+                        add_points_to_cell(&metadata.config, task.points, &mut cell);
+
+                    let points_after = cell.header().total_number_of_points;
+
+                    let added_points = points_after - points_before;
+                    metadata.number_of_points += added_points as u64;
+
+                    log::debug!("Added {} points to cell {:?}", added_points, handle.id());
+
                     for (cell_index, points) in remaining_points {
                         let id = CellId {
-                            hierarchy: id.hierarchy + 1,
+                            hierarchy: handle.id().hierarchy + 1,
                             index: cell_index,
                         };
 
