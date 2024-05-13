@@ -367,7 +367,7 @@ where
             },
         );
 
-        self.ref_counts.insert(id.clone(), 0);
+        self.ref_counts.entry(id.clone()).or_insert(0);
 
         let handle = AssetHandle::new(id, self.ref_count_channels.sender.clone());
 

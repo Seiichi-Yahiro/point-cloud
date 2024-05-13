@@ -10,11 +10,12 @@ use parking_lot::Mutex;
 
 use point_converter::cell::{Cell, CellId};
 use point_converter::converter::{add_points_to_cell, group_points};
-use point_converter::metadata::{Metadata, MetadataConfig};
+use point_converter::metadata::Metadata;
 use point_converter::point::Point;
 
-use crate::plugins::asset::source::{Directory, SourceError};
+use crate::plugins::asset::source::{Directory, Source, SourceError};
 use crate::plugins::asset::{AssetLoadedEvent, AssetManagerRes, AssetManagerResMut, LoadAssetMsg};
+use crate::plugins::metadata::{ActiveMetadata, MetadataState};
 use crate::plugins::thread_pool::ThreadPool;
 
 pub struct ConverterPlugin;
@@ -94,19 +95,16 @@ fn get_point_batch(
     batched_point_reader: Res<BatchedPointReader>,
     thread_pool: Res<ThreadPool>,
     cell_manager: AssetManagerRes<Cell>,
-    cell_tasks: Res<CellTasks>, //active_metadata: ActiveMetadata,
+    cell_tasks: Res<CellTasks>,
+    active_metadata: ActiveMetadata,
 ) {
     let reader = batched_point_reader.reader.as_ref().unwrap().clone();
 
-    let metadata = Metadata::default(); // TODO active_metadata.get().unwrap();
-    let config = metadata.config.clone();
+    let config = active_metadata.get().config.clone();
+    let working_directory = active_metadata.get_working_directory();
+
     let task_sender = cell_tasks.task_sender.clone();
     let load_sender = cell_manager.load_sender().clone();
-
-    // TODO real source
-    let working_directory = Directory::Path(PathBuf::from(
-        "C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2",
-    ));
 
     thread_pool.execute(move || match reader.lock().get_batch(10_000) {
         Ok(points) => {
@@ -141,7 +139,7 @@ impl CellTask {
     fn new(
         id: CellId,
         points: Vec<Point>,
-        working_directory: &Directory,
+        working_directory: &Option<Directory>,
         load_sender: &Sender<LoadAssetMsg<Cell>>,
     ) -> Self {
         let (sender, receiver) = flume::bounded(1);
@@ -149,7 +147,9 @@ impl CellTask {
         load_sender
             .send(LoadAssetMsg {
                 id,
-                source: working_directory.join(&id.path()),
+                source: working_directory
+                    .as_ref()
+                    .map_or(Source::None, |dir| dir.join(&id.path())),
                 reply_sender: Some(sender),
             })
             .unwrap();
@@ -199,13 +199,12 @@ fn receive_cell_tasks(mut cell_tasks: ResMut<CellTasks>) {
 fn add_points_to_cell_system(
     mut cell_manager: AssetManagerResMut<Cell>,
     mut cell_tasks: ResMut<CellTasks>,
+    active_metadata: ActiveMetadata,
 ) {
     for _ in 0..cell_tasks.tasks.len().min(10) {
         if let Some(task) = cell_tasks.tasks.pop_front() {
-            let config = MetadataConfig::default(); // TODO real config and source
-            let working_directory = Directory::Path(PathBuf::from(
-                "C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2",
-            ));
+            let config = &active_metadata.get().config;
+            let working_directory = active_metadata.get_working_directory();
 
             match task.loaded_asset_receiver.try_recv() {
                 Ok(loaded_asset_event) => {
@@ -220,12 +219,12 @@ fn add_points_to_cell_system(
                             let mut cell = cell_manager.get_mut(&handle).asset_mut();
                             (
                                 *handle.id(),
-                                add_points_to_cell(&config, task.points, &mut cell),
+                                add_points_to_cell(config, task.points, &mut cell),
                             )
                         }
                         AssetLoadedEvent::Error { id, error } => {
                             match error {
-                                SourceError::NotFound(_) => {
+                                SourceError::NotFound(_) | SourceError::NoSource => {
                                     // OK
                                 }
                                 _ => {
@@ -248,9 +247,11 @@ fn add_points_to_cell_system(
                             );
 
                             let remaining_points =
-                                add_points_to_cell(&config, task.points, &mut cell);
+                                add_points_to_cell(config, task.points, &mut cell);
 
-                            let source = working_directory.join(&id.path());
+                            let source = working_directory
+                                .as_ref()
+                                .map_or(Source::None, |dir| dir.join(&id.path()));
 
                             let _handle = cell_manager.insert(id, cell, source); // TODO save handle?
 
@@ -284,6 +285,17 @@ fn add_points_to_cell_system(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    if ui.button("New point cloud").clicked() {
+        let mut params = SystemState::<(
+            ResMut<NextState<MetadataState>>,
+            AssetManagerResMut<Metadata>,
+        )>::new(world);
+
+        let (mut next_metadata_state, mut metadata_manager) = params.get_mut(world);
+        let _ = metadata_manager.insert("Unknown".to_string(), Metadata::default(), Source::None);
+        next_metadata_state.set(MetadataState::Loading);
+    }
+
     if ui.button("Choose files to convert...").clicked() {
         select_files(world);
     }
