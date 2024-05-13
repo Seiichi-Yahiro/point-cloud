@@ -210,7 +210,7 @@ fn toggle_bounding_box(
     bounding_box_query: Query<Entity, With<BoundingBoxLine>>,
 ) {
     if *show {
-        let aabb = active_metadata.get().unwrap().bounding_box;
+        let aabb = active_metadata.get().bounding_box;
         let lines = line_box(
             [255, 0, 0, 255],
             (aabb.min + aabb.max) / 2.0,
@@ -225,7 +225,7 @@ fn toggle_bounding_box(
 }
 
 fn update_hierarchies(mut state: ResMut<State>, active_metadata: ActiveMetadata) {
-    let hierarchies = active_metadata.get().unwrap().hierarchies as usize;
+    let hierarchies = active_metadata.get().hierarchies as usize;
     state.grid.hierarchies = vec![true; hierarchies];
     state.streaming_frustums_visibility.hierarchies = vec![true; hierarchies];
     state.hierarchy_visibility.hierarchies = vec![true; hierarchies];

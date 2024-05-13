@@ -31,10 +31,10 @@ impl App {
         app.add_plugins((InputPlugin, CameraPlugin, FPSPlugin))
             .add_plugins((
                 ThreadPoolPlugin,
-                #[cfg(not(target_arch = "wasm32"))]
-                crate::plugins::converter::ConverterPlugin,
                 MetadataPlugin,
                 CellPlugin,
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugins::converter::ConverterPlugin,
                 DebugPlugin,
                 RenderPlugin,
             ))

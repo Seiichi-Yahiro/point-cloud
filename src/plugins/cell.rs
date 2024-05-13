@@ -157,7 +157,7 @@ fn set_view_distance(
     mut camera_query: Query<&mut PerspectiveProjection, With<Camera>>,
 ) {
     for mut projection in camera_query.iter_mut() {
-        projection.far = active_metadata.get().unwrap().config.max_cell_size;
+        projection.far = active_metadata.get().config.max_cell_size;
     }
 }
 
@@ -353,7 +353,7 @@ fn update_cells(
     >,
     active_metadata: ActiveMetadata,
 ) {
-    let metadata = active_metadata.get().unwrap();
+    let metadata = active_metadata.get();
 
     for (streaming_frustums, transform) in camera_query.iter() {
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());

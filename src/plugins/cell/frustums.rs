@@ -62,7 +62,7 @@ pub fn update_streaming_frustums(
     >,
     streaming_frustums_scale: Res<StreamingFrustumsScale>,
 ) {
-    let metadata = &active_metadata.get().unwrap();
+    let metadata = active_metadata.get();
 
     for (transform, projection, frustum, mut streaming_frustums) in camera_query.iter_mut() {
         if !(frustum.is_changed() || streaming_frustums_scale.is_changed()) {
@@ -129,12 +129,10 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
             frustums_settings.size_by_distance = size_by_distance;
         }
 
-        let hierarchies = active_metadata
-            .get()
-            .map_or(1, |metadata| metadata.hierarchies);
+        let hierarchies = active_metadata.get().hierarchies;
 
         let mut max_hierarchy = frustums_settings.max_hierarchy;
-        let slider = egui::Slider::new(&mut max_hierarchy, 0..=hierarchies - 1);
+        let slider = egui::Slider::new(&mut max_hierarchy, 0..=hierarchies.saturating_sub(1));
 
         if ui.add_enabled(size_by_distance, slider).changed() {
             frustums_settings.max_hierarchy = max_hierarchy;

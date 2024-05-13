@@ -275,6 +275,10 @@ pub(super) fn update_frustums_buffer(
             .map(|far_center| camera_transform.translation.distance(far_center))
             .collect_vec();
 
+        if far_distances.is_empty() {
+            continue;
+        }
+
         if frustums_buffer.capacity != far_distances.len() {
             *frustums_buffer = FrustumsBuffer::new(far_distances.len(), &device);
         }
@@ -291,7 +295,7 @@ pub(super) fn set_frustums_settings_max_hierarchy(
     active_metadata: ActiveMetadata,
     mut frustums_settings: ResMut<FrustumsSettings>,
 ) {
-    frustums_settings.max_hierarchy = active_metadata.get().unwrap().hierarchies - 1;
+    frustums_settings.max_hierarchy = active_metadata.get().hierarchies.saturating_sub(1);
 }
 
 pub(super) fn update_frustums_settings_buffer(

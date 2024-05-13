@@ -85,7 +85,7 @@ pub(in crate::plugins) fn update_metadata_buffer(
     mut metadata_bind_group_data: ResMut<MetadataBindGroupData>,
     active_metadata: ActiveMetadata,
 ) {
-    let metadata = active_metadata.get().unwrap();
+    let metadata = active_metadata.get();
 
     let hierarchies = (0..metadata.hierarchies)
         .map(|hierarchy| {

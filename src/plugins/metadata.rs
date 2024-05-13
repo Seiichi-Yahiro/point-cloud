@@ -10,7 +10,8 @@ use point_converter::metadata::Metadata;
 
 use crate::plugins::asset::source::{Directory, IOError, Source};
 use crate::plugins::asset::{
-    Asset, AssetHandle, AssetManagerRes, AssetPlugin, LoadAssetMsg, LoadedAssetEvent,
+    Asset, AssetHandle, AssetManagerRes, AssetManagerResMut, AssetPlugin, LoadAssetMsg,
+    LoadedAssetEvent,
 };
 use crate::plugins::camera::Camera;
 use crate::transform::Transform;
@@ -46,8 +47,8 @@ impl Plugin for MetadataPlugin {
         shader::setup(&mut app.world);
 
         app.add_plugins(AssetPlugin::<Metadata>::default())
-            .insert_resource(LoadedMetadata::default())
             .insert_state(MetadataState::NotLoaded)
+            .add_systems(PreStartup, setup)
             .add_systems(
                 Update,
                 receive_metadata
@@ -61,6 +62,16 @@ impl Plugin for MetadataPlugin {
     }
 }
 
+fn setup(
+    mut commands: Commands,
+    mut metadata_manager: AssetManagerResMut<Metadata>,
+    mut next_metadata_state: ResMut<NextState<MetadataState>>,
+) {
+    let handle = metadata_manager.insert("Unknown".to_string(), Metadata::default(), Source::None);
+    commands.insert_resource(LoadedMetadata { active: handle });
+    next_metadata_state.set(MetadataState::Loaded);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
 pub enum MetadataState {
     NotLoaded,
@@ -70,9 +81,9 @@ pub enum MetadataState {
     Loaded,
 }
 
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Resource)]
 pub struct LoadedMetadata {
-    active: Option<AssetHandle<Metadata>>,
+    active: AssetHandle<Metadata>,
 }
 
 #[derive(SystemParam)]
@@ -82,30 +93,25 @@ pub struct ActiveMetadata<'w> {
 }
 
 impl<'w> ActiveMetadata<'w> {
-    pub fn get(&self) -> Option<&Metadata> {
-        self.loaded_metadata
-            .active
-            .as_ref()
-            .map(|handle| self.metadata_manager.get(handle).asset())
+    pub fn get(&self) -> &Metadata {
+        let handle = &self.loaded_metadata.active;
+        self.metadata_manager.get(handle).asset()
     }
 
     pub fn get_working_directory(&self) -> Option<Directory> {
-        self.loaded_metadata
-            .active
-            .as_ref()
-            .map(|handle| self.metadata_manager.get(handle).source())
-            .and_then(|source| match source {
-                #[cfg(not(target_arch = "wasm32"))]
-                Source::Path(path) => Some(Directory::Path(path.parent().unwrap().to_path_buf())),
-                #[cfg(target_arch = "wasm32")]
-                Source::PathInDirectory { directory, .. } => {
-                    Some(Directory::WebDir(directory.clone()))
-                }
-                Source::URL(_) => {
-                    todo!()
-                }
-                Source::None => None,
-            })
+        let handle = &self.loaded_metadata.active;
+        let source = self.metadata_manager.get(handle).source();
+
+        match source {
+            #[cfg(not(target_arch = "wasm32"))]
+            Source::Path(path) => Some(Directory::Path(path.parent().unwrap().to_path_buf())),
+            #[cfg(target_arch = "wasm32")]
+            Source::PathInDirectory { directory, .. } => Some(Directory::WebDir(directory.clone())),
+            Source::URL(_) => {
+                todo!()
+            }
+            Source::None => None,
+        }
     }
 }
 
@@ -128,7 +134,7 @@ fn receive_metadata(
 
                 next_metadata_state.set(MetadataState::Loaded);
 
-                loaded_metadata.active = Some(handle.clone());
+                loaded_metadata.active = handle.clone();
             }
             LoadedAssetEvent::Error { id, kind } => {
                 log::error!("Failed to load metadata {}: {:?}", id, kind);
@@ -142,7 +148,7 @@ fn look_at_bounding_box(
     mut query: Query<&mut Transform, With<Camera>>,
     active_metadata: ActiveMetadata,
 ) {
-    let aabb = active_metadata.get().unwrap().bounding_box;
+    let aabb = active_metadata.get().bounding_box;
     let center = (aabb.min + aabb.max) / 2.0;
 
     let center_max_z = center.with_z(aabb.max.z);
@@ -210,23 +216,22 @@ fn handle_selection(
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     let mut params = SystemState::<ActiveMetadata>::new(world);
     let active_metadata = params.get(world);
+    let metadata = active_metadata.get();
 
-    if let Some(metadata) = active_metadata.get() {
-        ui.label(format!("Cloud name: {}", metadata.name));
-        ui.label(format!(
-            "Total points: {}",
-            metadata.number_of_points.separate_with_commas()
-        ));
-        ui.label(format!("Hierarchies: {}", metadata.hierarchies));
+    ui.label(format!("Cloud name: {}", metadata.name));
+    ui.label(format!(
+        "Total points: {}",
+        metadata.number_of_points.separate_with_commas()
+    ));
+    ui.label(format!("Hierarchies: {}", metadata.hierarchies));
 
-        ui.collapsing("Extends", |ui| {
-            let extends = metadata.bounding_box.max - metadata.bounding_box.min;
+    ui.collapsing("Extends", |ui| {
+        let extends = metadata.bounding_box.max - metadata.bounding_box.min;
 
-            ui.label(format!("x: {}", extends.x));
-            ui.label(format!("y: {}", extends.y));
-            ui.label(format!("z: {}", extends.z));
-        });
-    }
+        ui.label(format!("x: {}", extends.x));
+        ui.label(format!("y: {}", extends.y));
+        ui.label(format!("z: {}", extends.z));
+    });
 
     select_metadata(ui, world);
 }
