@@ -5,6 +5,7 @@ use std::io::Read;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bounding_volume::Aabb;
 use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
 use egui::ahash::{HashMapExt, HashSetExt};
@@ -19,7 +20,6 @@ use crate::plugins::asset::source::SourceError;
 use crate::plugins::asset::{
     Asset, AssetEvent, AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetPlugin, LoadAssetMsg,
 };
-use crate::plugins::camera::frustum::Aabb;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};

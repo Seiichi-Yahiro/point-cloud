@@ -1,6 +1,7 @@
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 
+use bounding_volume::Aabb;
 use glam::{IVec3, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +22,7 @@ pub struct Metadata {
     pub hierarchies: u32,
 
     /// A 3D Bounding box of the point cloud with min max values for every dimension.
-    pub bounding_box: BoundingBox,
+    pub bounding_box: Aabb,
 
     /// Configuration
     pub config: MetadataConfig,
@@ -34,7 +35,7 @@ impl Default for Metadata {
             name: "Unknown".to_string(),
             number_of_points: 0,
             hierarchies: 0,
-            bounding_box: BoundingBox::default(),
+            bounding_box: Aabb::default(),
             config: MetadataConfig::default(),
         }
     }
@@ -102,23 +103,5 @@ impl MetadataConfig {
 
     pub fn cell_spacing(&self, cell_size: f32) -> f32 {
         (cell_size / self.sub_grid_dimension as f32) * 0.5 * 3.0f32.sqrt()
-    }
-}
-
-#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
-/// A 3D Bounding box with min max values .
-pub struct BoundingBox {
-    pub min: Vec3,
-    pub max: Vec3,
-}
-
-impl BoundingBox {
-    pub fn new(min: Vec3, max: Vec3) -> Self {
-        Self { min, max }
-    }
-
-    pub fn extend(&mut self, point: Point) {
-        self.min = self.min.min(point.pos);
-        self.max = self.max.max(point.pos);
     }
 }

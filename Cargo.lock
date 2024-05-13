@@ -597,6 +597,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bounding-volume"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2156,6 +2164,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
+ "bounding-volume",
  "bytemuck",
  "bytesize",
  "caches",
@@ -2190,6 +2199,7 @@ dependencies = [
 name = "point-converter"
 version = "0.1.0"
 dependencies = [
+ "bounding-volume",
  "byteorder",
  "caches",
  "clap",

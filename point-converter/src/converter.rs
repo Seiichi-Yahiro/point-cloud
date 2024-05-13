@@ -4,6 +4,7 @@ use std::hash::BuildHasherDefault;
 use std::io::{BufWriter, Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
+use bounding_volume::Aabb;
 use caches::{Cache, LRUCache, PutResult};
 use glam::IVec3;
 use rustc_hash::{FxHashMap, FxHasher};
@@ -13,7 +14,7 @@ pub use own::BatchedPointCloudPointReader;
 pub use ply::BatchedPlyPointReader;
 
 use crate::cell::{Cell, CellId};
-use crate::metadata::{BoundingBox, Metadata, MetadataConfig};
+use crate::metadata::{Metadata, MetadataConfig};
 use crate::point::Point;
 
 mod las;
@@ -96,10 +97,10 @@ impl Converter {
         let mut point_iter = points.iter();
 
         if let Some(first_point) = point_iter.next() {
-            let mut bb = BoundingBox::new(first_point.pos, first_point.pos);
+            let mut bb = Aabb::new(first_point.pos, first_point.pos);
 
             for point in point_iter {
-                bb.extend(*point);
+                bb.extend(point.pos);
             }
 
             if self.metadata.number_of_points == 0 {
