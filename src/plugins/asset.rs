@@ -549,6 +549,8 @@ where
         }
 
         for id in freed_assets.drain() {
+            log::debug!("Evicting asset {:?}", id);
+
             let entry = self.store.remove(&id).unwrap();
             match entry.load_status {
                 AssetLoadStatus::Loading => {}
