@@ -70,12 +70,6 @@ pub enum MetadataState {
     Loaded,
 }
 
-#[derive(Debug)]
-pub struct MetadataEntry {
-    working_directory: Directory,
-    handle: AssetHandle<Metadata>,
-}
-
 #[derive(Debug, Default, Resource)]
 pub struct LoadedMetadata {
     active: Option<AssetHandle<Metadata>>,

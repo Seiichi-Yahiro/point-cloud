@@ -59,10 +59,6 @@ pub trait Asset: Send + Sync + Sized + 'static {
     fn save(&self, _source: Source) -> Result<(), IOError> {
         Ok(())
     }
-
-    fn should_save(&self) -> bool {
-        false
-    }
 }
 
 #[derive(Debug, Component)]
@@ -520,7 +516,7 @@ where
                 AssetLoadStatus::Loaded => {
                     let asset = entry.asset.unwrap();
 
-                    if asset.should_save() && entry.change_status == AssetChangeStatus::Changed {
+                    if entry.change_status == AssetChangeStatus::Changed {
                         asset.save(entry.source).unwrap(); // TODO thread?
                     }
                 }

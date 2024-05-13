@@ -83,11 +83,6 @@ impl Asset for Cell {
             Source::None => Ok(()),
         }
     }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn should_save(&self) -> bool {
-        true
-    }
 }
 
 pub struct CellPlugin;
