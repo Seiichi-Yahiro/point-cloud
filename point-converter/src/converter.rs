@@ -94,20 +94,11 @@ impl Converter {
     }
 
     fn update_bounding_box(&mut self, points: &[Point]) {
-        let mut point_iter = points.iter();
-
-        if let Some(first_point) = point_iter.next() {
-            let mut bb = Aabb::new(first_point.pos, first_point.pos);
-
-            for point in point_iter {
-                bb.extend(point.pos);
-            }
-
+        if let Some(aabb) = Aabb::from(points.iter().map(|point| point.pos)) {
             if self.metadata.number_of_points == 0 {
-                self.metadata.bounding_box = bb;
+                self.metadata.bounding_box = aabb;
             } else {
-                self.metadata.bounding_box.min = self.metadata.bounding_box.min.min(bb.min);
-                self.metadata.bounding_box.max = self.metadata.bounding_box.max.max(bb.max);
+                self.metadata.bounding_box.extend_aabb(&aabb);
             }
         }
     }

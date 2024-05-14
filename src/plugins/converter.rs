@@ -8,6 +8,7 @@ use bevy_ecs::system::SystemState;
 use flume::{Receiver, Sender, TryRecvError};
 use parking_lot::Mutex;
 
+use bounding_volume::Aabb;
 use point_converter::cell::{Cell, CellId};
 use point_converter::converter::{add_points_to_cell, group_points};
 use point_converter::metadata::Metadata;
@@ -27,7 +28,7 @@ impl Plugin for ConverterPlugin {
                 reader: None,
                 remaining_points: 0,
             })
-            .insert_resource(CellTasks::default())
+            .insert_resource(Tasks::default())
             .insert_state(ConversionState::NotStarted)
             .add_systems(
                 OnEnter(ConversionState::Converting),
@@ -35,7 +36,7 @@ impl Plugin for ConverterPlugin {
             )
             .add_systems(
                 Update,
-                (receive_cell_tasks, add_points_to_cell_system)
+                (receive_tasks, add_points_to_cell_system)
                     .chain()
                     .run_if(in_state(ConversionState::Converting)),
             );
@@ -95,7 +96,7 @@ fn get_point_batch(
     batched_point_reader: Res<BatchedPointReader>,
     thread_pool: Res<ThreadPool>,
     cell_manager: AssetManagerRes<Cell>,
-    cell_tasks: Res<CellTasks>,
+    tasks: Res<Tasks>,
     active_metadata: ActiveMetadata,
 ) {
     let reader = batched_point_reader.reader.as_ref().unwrap().clone();
@@ -103,7 +104,7 @@ fn get_point_batch(
     let config = active_metadata.get().config.clone();
     let working_directory = active_metadata.get_working_directory();
 
-    let task_sender = cell_tasks.task_sender.clone();
+    let task_sender = tasks.task_sender.clone();
     let load_sender = cell_manager.load_sender().clone();
 
     thread_pool.execute(move || match reader.lock().get_batch(10_000) {
@@ -111,15 +112,19 @@ fn get_point_batch(
             if points.is_empty() {
                 // TODO
             } else {
+                let aabb = Aabb::from(points.iter().map(|point| point.pos)).unwrap();
+                task_sender.send(TaskMsg::UpdateBoundingBox(aabb)).unwrap();
+
                 let grouped_points = group_points(points, 0, &config);
+
                 for (cell_index, points) in grouped_points {
                     let id = CellId {
                         index: cell_index,
                         hierarchy: 0,
                     };
 
-                    let task = CellTask::new(id, points, &working_directory, &load_sender);
-                    task_sender.send(task).unwrap();
+                    let cell_task = CellTask::new(id, points, &working_directory, &load_sender);
+                    task_sender.send(TaskMsg::CellTask(cell_task)).unwrap();
                 }
             }
         }
@@ -127,6 +132,12 @@ fn get_point_batch(
             log::error!("{:?}", err);
         }
     });
+}
+
+#[derive(Debug)]
+enum TaskMsg {
+    UpdateBoundingBox(Aabb),
+    CellTask(CellTask),
 }
 
 #[derive(Debug)]
@@ -162,29 +173,38 @@ impl CellTask {
 }
 
 #[derive(Debug, Resource)]
-struct CellTasks {
-    tasks: VecDeque<CellTask>,
-    task_sender: Sender<CellTask>,
-    task_receiver: Receiver<CellTask>,
+struct Tasks {
+    cell_tasks: VecDeque<CellTask>,
+    task_sender: Sender<TaskMsg>,
+    task_receiver: Receiver<TaskMsg>,
 }
 
-impl Default for CellTasks {
+impl Default for Tasks {
     fn default() -> Self {
         let (task_sender, task_receiver) = flume::unbounded();
 
         Self {
-            tasks: VecDeque::default(),
+            cell_tasks: VecDeque::default(),
             task_sender,
             task_receiver,
         }
     }
 }
 
-fn receive_cell_tasks(mut cell_tasks: ResMut<CellTasks>) {
+fn receive_tasks(mut tasks: ResMut<Tasks>, mut active_metadata: ActiveMetadataMut) {
     loop {
-        match cell_tasks.task_receiver.try_recv() {
-            Ok(task) => {
-                cell_tasks.tasks.push_back(task);
+        match tasks.task_receiver.try_recv() {
+            Ok(TaskMsg::UpdateBoundingBox(aabb)) => {
+                let mut metadata = active_metadata.get_mut();
+
+                if metadata.number_of_points == 0 {
+                    metadata.bounding_box = aabb;
+                } else {
+                    metadata.bounding_box.extend_aabb(&aabb);
+                }
+            }
+            Ok(TaskMsg::CellTask(cell_task)) => {
+                tasks.cell_tasks.push_back(cell_task);
             }
             Err(TryRecvError::Empty) => {
                 break;
@@ -198,14 +218,14 @@ fn receive_cell_tasks(mut cell_tasks: ResMut<CellTasks>) {
 
 fn add_points_to_cell_system(
     mut cell_manager: AssetManagerResMut<Cell>,
-    mut cell_tasks: ResMut<CellTasks>,
+    mut tasks: ResMut<Tasks>,
     mut active_metadata: ActiveMetadataMut,
 ) {
     let working_directory = active_metadata.get_working_directory();
     let mut metadata = active_metadata.get_mut();
 
-    for _ in 0..cell_tasks.tasks.len().min(10) {
-        if let Some(task) = cell_tasks.tasks.pop_front() {
+    for _ in 0..tasks.cell_tasks.len().min(10) {
+        if let Some(task) = tasks.cell_tasks.pop_front() {
             match task.loaded_asset_receiver.try_recv() {
                 Ok(loaded_asset_event) => {
                     let handle = match loaded_asset_event {
@@ -268,11 +288,11 @@ fn add_points_to_cell_system(
                             cell_manager.load_sender(),
                         );
 
-                        cell_tasks.tasks.push_back(task);
+                        tasks.cell_tasks.push_back(task);
                     }
                 }
                 Err(TryRecvError::Empty) => {
-                    cell_tasks.tasks.push_back(task);
+                    tasks.cell_tasks.push_back(task);
                 }
                 Err(TryRecvError::Disconnected) => {}
             }

@@ -1,11 +1,10 @@
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 
-use bounding_volume::Aabb;
 use glam::{IVec3, Vec3};
 use serde::{Deserialize, Serialize};
 
-use crate::point::Point;
+use bounding_volume::Aabb;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
