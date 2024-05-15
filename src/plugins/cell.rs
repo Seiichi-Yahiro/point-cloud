@@ -16,14 +16,16 @@ use thousands::Separable;
 
 use point_converter::cell::{Cell, CellId};
 
-use crate::plugins::asset::source::SourceError;
+use crate::plugins::asset::source::{Source, SourceError};
 use crate::plugins::asset::{
     Asset, AssetEvent, AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetPlugin, LoadAssetMsg,
 };
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};
-use crate::plugins::metadata::{ActiveMetadata, MetadataState};
+use crate::plugins::metadata::{
+    ActiveMetadata, MetadataState, UpdatedMetadataBoundingBoxEvent, UpdatedMetadataHierarchiesEvent,
+};
 use crate::plugins::render::point::Point;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::Device;
@@ -40,16 +42,15 @@ impl Asset for Cell {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn save(&self, source: crate::plugins::asset::source::Source) -> Result<(), SourceError> {
-        use crate::plugins::asset::source::Source;
-        use std::fs::{create_dir, File};
+    fn save(&self, source: Source) -> Result<(), SourceError> {
+        use std::fs::{create_dir_all, File};
         use std::io::{BufWriter, ErrorKind, Write};
 
         match source {
             Source::Path(path) => {
                 log::debug!("Saving cell at {:?}", path);
 
-                if let Err(err) = create_dir(path.parent().unwrap()) {
+                if let Err(err) = create_dir_all(path.parent().unwrap()) {
                     match err.kind() {
                         ErrorKind::AlreadyExists => {}
                         _ => {
@@ -127,8 +128,13 @@ impl Plugin for CellPlugin {
                     (
                         shader::update_loaded_cells_buffer.run_if(resource_changed::<LoadedCells>),
                         shader::update_frustums_buffer,
-                        shader::update_frustums_settings_buffer
-                            .run_if(resource_changed::<FrustumsSettings>),
+                        (
+                            shader::set_frustums_settings_max_hierarchy
+                                .run_if(on_event::<UpdatedMetadataHierarchiesEvent>()),
+                            shader::update_frustums_settings_buffer
+                                .run_if(resource_changed::<FrustumsSettings>),
+                        )
+                            .chain(),
                     ),
                     shader::update_cells_bind_group,
                 )
@@ -334,6 +340,7 @@ fn receive_cell(
                         log::debug!("Cell is missing: {:?}", id);
                         missing_cells.0.put(*id, ());
                     }
+                    SourceError::NoSource => {}
                     _ => {
                         // TODO do something with the failed cell
                         log::error!("Failed to load cell {:?}: {:?}", id, error);
@@ -349,15 +356,18 @@ fn update_cells(
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
-    camera_query: Query<
-        (&frustums::StreamingFrustums, &Transform),
-        (With<Camera>, Changed<frustums::StreamingFrustums>),
-    >,
+    camera_query: Query<(Ref<frustums::StreamingFrustums>, &Transform), With<Camera>>,
     active_metadata: ActiveMetadata,
+    mut updated_bounding_box_events: EventReader<UpdatedMetadataBoundingBoxEvent>,
 ) {
     let metadata = active_metadata.get();
+    let updated_metadata = updated_bounding_box_events.read().count() > 0;
 
     for (streaming_frustums, transform) in camera_query.iter() {
+        if !(streaming_frustums.is_changed() || updated_metadata) {
+            continue;
+        }
+
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
         let mut new_should_load = BTreeSet::new();
 
@@ -427,8 +437,9 @@ fn enqueue_cells_to_load(
         if let Some(cell_to_load) = loading_cells.should_load.pop_first() {
             loading_cells.loading.insert(cell_to_load.id);
 
-            let working_directory = active_metadata.get_working_directory().unwrap();
-            let source = working_directory.join(&cell_to_load.id.path());
+            let working_directory = active_metadata.get_working_directory();
+            let source =
+                working_directory.map_or(Source::None, |dir| dir.join(&cell_to_load.id.path()));
 
             cell_manager
                 .load_sender()

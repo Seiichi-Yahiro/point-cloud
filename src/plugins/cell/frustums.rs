@@ -7,7 +7,7 @@ use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::Camera;
 use crate::plugins::cell::shader::FrustumsSettings;
-use crate::plugins::metadata::ActiveMetadata;
+use crate::plugins::metadata::{ActiveMetadata, UpdatedMetadataHierarchiesEvent};
 use crate::transform::Transform;
 
 #[derive(Resource)]
@@ -51,6 +51,7 @@ pub fn add_streaming_frustums(mut commands: Commands, camera_query: Query<Entity
 
 pub fn update_streaming_frustums(
     active_metadata: ActiveMetadata,
+    mut updated_metadata_hierarchies_events: EventReader<UpdatedMetadataHierarchiesEvent>,
     mut camera_query: Query<
         (
             &Transform,
@@ -63,9 +64,10 @@ pub fn update_streaming_frustums(
     streaming_frustums_scale: Res<StreamingFrustumsScale>,
 ) {
     let metadata = active_metadata.get();
+    let updated_metadata = updated_metadata_hierarchies_events.read().count() > 0;
 
     for (transform, projection, frustum, mut streaming_frustums) in camera_query.iter_mut() {
-        if !(frustum.is_changed() || streaming_frustums_scale.is_changed()) {
+        if !(frustum.is_changed() || streaming_frustums_scale.is_changed() || updated_metadata) {
             continue;
         }
 

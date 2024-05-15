@@ -3,11 +3,13 @@ use std::io::Read;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemParam, SystemState};
+use bounding_volume::Aabb;
 use glam::Vec3;
 use thousands::Separable;
 
 use point_converter::metadata::Metadata;
 
+use crate::event_set::prelude::*;
 use crate::plugins::asset::source::{Directory, Source, SourceError};
 use crate::plugins::asset::{
     Asset, AssetEvent, AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetManagerResMut,
@@ -51,15 +53,77 @@ impl Plugin for MetadataPlugin {
 
         app.add_plugins(AssetPlugin::<Metadata>::default())
             .insert_state(MetadataState::NotLoaded)
+            .add_event::<UpdateMetadataEvent>()
+            .add_event_set::<UpdatedMetadataEventSet>()
             .add_systems(PreStartup, setup)
             .add_systems(
                 Update,
                 receive_metadata.run_if(on_event::<AssetEvent<Metadata>>()),
             )
             .add_systems(
+                PostUpdate,
+                (
+                    update_metadata.run_if(on_event::<UpdateMetadataEvent>()),
+                    shader::update_metadata_buffer
+                        .run_if(on_event::<UpdatedMetadataHierarchiesEvent>()),
+                )
+                    .chain(),
+            )
+            .add_systems(
                 OnEnter(MetadataState::Loaded),
                 (look_at_bounding_box, shader::update_metadata_buffer),
             );
+    }
+}
+
+#[derive(Debug, Copy, Clone, Event)]
+pub struct UpdatedMetadataHierarchiesEvent;
+
+#[derive(Debug, Copy, Clone, Event)]
+pub struct UpdatedMetadataBoundingBoxEvent;
+
+event_set!(pub UpdatedMetadataEventSet {
+    UpdatedMetadataHierarchiesEvent,
+    UpdatedMetadataBoundingBoxEvent
+});
+
+#[derive(Debug, Copy, Clone, Event)]
+pub enum UpdateMetadataEvent {
+    NumberOfPoints(i32),
+    IncreaseHierarchy(u32),
+    ExtendBoundingBox(Aabb),
+}
+
+fn update_metadata(
+    mut events: EventReader<UpdateMetadataEvent>,
+    mut active_metadata: ActiveMetadataMut,
+    mut updated_metadata_event_set: UpdatedMetadataEventSet,
+) {
+    let mut metadata = active_metadata.get_mut();
+
+    for event in events.read() {
+        match event {
+            UpdateMetadataEvent::NumberOfPoints(points) => {
+                metadata.number_of_points = metadata
+                    .number_of_points
+                    .wrapping_add_signed(*points as i64);
+            }
+            UpdateMetadataEvent::IncreaseHierarchy(hierarchy) => {
+                if metadata.hierarchies <= *hierarchy {
+                    metadata.hierarchies = *hierarchy + 1;
+                    updated_metadata_event_set.dispatch(UpdatedMetadataHierarchiesEvent);
+                }
+            }
+            UpdateMetadataEvent::ExtendBoundingBox(aabb) => {
+                if metadata.number_of_points == 0 {
+                    metadata.bounding_box = *aabb;
+                } else {
+                    metadata.bounding_box.extend_aabb(aabb);
+                }
+
+                updated_metadata_event_set.dispatch(UpdatedMetadataBoundingBoxEvent);
+            }
+        }
     }
 }
 
@@ -100,7 +164,7 @@ pub struct ActiveMetadata<'w> {
 }
 
 #[derive(SystemParam)]
-pub struct ActiveMetadataMut<'w> {
+struct ActiveMetadataMut<'w> {
     loaded_metadata: Res<'w, LoadedMetadata>,
     metadata_manager: AssetManagerResMut<'w, Metadata>,
 }
@@ -135,12 +199,6 @@ impl<'w> ActiveMetadataMut<'w> {
     pub fn get_mut(&mut self) -> MutAsset<Metadata> {
         let handle = &self.loaded_metadata.active;
         self.metadata_manager.get_asset_mut(handle)
-    }
-
-    pub fn get_working_directory(&self) -> Option<Directory> {
-        let handle = &self.loaded_metadata.active;
-        let source = self.metadata_manager.get_asset_source(handle);
-        get_working_directory(source)
     }
 }
 
