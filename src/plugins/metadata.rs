@@ -121,12 +121,12 @@ fn get_working_directory(source: &Source) -> Option<Directory> {
 impl<'w> ActiveMetadata<'w> {
     pub fn get(&self) -> &Metadata {
         let handle = &self.loaded_metadata.active;
-        self.metadata_manager.get(handle).asset()
+        self.metadata_manager.get_asset(handle)
     }
 
     pub fn get_working_directory(&self) -> Option<Directory> {
         let handle = &self.loaded_metadata.active;
-        let source = self.metadata_manager.get(handle).source();
+        let source = self.metadata_manager.get_asset_source(handle);
         get_working_directory(source)
     }
 }
@@ -134,12 +134,12 @@ impl<'w> ActiveMetadata<'w> {
 impl<'w> ActiveMetadataMut<'w> {
     pub fn get_mut(&mut self) -> MutAsset<Metadata> {
         let handle = &self.loaded_metadata.active;
-        self.metadata_manager.get_mut(handle).asset_mut()
+        self.metadata_manager.get_asset_mut(handle)
     }
 
     pub fn get_working_directory(&self) -> Option<Directory> {
         let handle = &self.loaded_metadata.active;
-        let source = self.metadata_manager.get(handle).source();
+        let source = self.metadata_manager.get_asset_source(handle);
         get_working_directory(source)
     }
 }
@@ -154,7 +154,7 @@ fn receive_metadata(
         match event {
             AssetEvent::Created { handle }
             | AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
-                let metadata = metadata_manager.get(handle).asset();
+                let metadata = metadata_manager.get_asset(handle);
 
                 log::debug!(
                     "Loaded metadata for {} with {} points",
@@ -166,6 +166,7 @@ fn receive_metadata(
 
                 loaded_metadata.set_active(handle.clone());
             }
+            AssetEvent::Changed { .. } => {}
             AssetEvent::Loaded(AssetLoadedEvent::Error { id, error }) => {
                 log::error!("Failed to load metadata {}: {:?}", id, error);
                 next_metadata_state.set(MetadataState::NotLoaded);

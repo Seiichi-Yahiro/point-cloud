@@ -289,6 +289,23 @@ fn receive_cell(
             AssetEvent::Created { handle } => {
                 missing_cells.0.remove(handle.id());
             }
+            AssetEvent::Changed { handle } => {
+                if let Some(entity) = loaded_cells.0.get(handle.id()) {
+                    log::debug!("Reloading points for {:?}", handle.id());
+
+                    let cell = cell_manager.get_asset(handle);
+                    let points = cell
+                        .all_points()
+                        .map(|it| Point {
+                            position: it.pos,
+                            color: it.color,
+                        })
+                        .collect_vec();
+
+                    let vertex_buffer = VertexBuffer::new(&device, &points);
+                    commands.entity(*entity).insert(vertex_buffer);
+                }
+            }
             AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
                 let id = handle.id();
 
@@ -300,7 +317,7 @@ fn receive_cell(
                 log::debug!("Loaded cell: {:?}", id);
 
                 // TODO delay reading of cell
-                let cell = cell_manager.get(handle).asset();
+                let cell = cell_manager.get_asset(handle);
                 let cell_bundle =
                     CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
                 let entity = commands.spawn(cell_bundle).id();

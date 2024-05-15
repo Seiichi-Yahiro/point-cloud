@@ -262,18 +262,22 @@ fn add_points_to_cell_system(
                         }
                     };
 
-                    let mut cell = cell_manager.get_mut(&handle).asset_mut();
-                    let points_before = cell.header().total_number_of_points;
+                    let remaining_points = {
+                        let mut cell = cell_manager.get_asset_mut(&handle);
+                        let points_before = cell.header().total_number_of_points;
 
-                    let remaining_points =
-                        add_points_to_cell(&metadata.config, task.points, &mut cell);
+                        let remaining_points =
+                            add_points_to_cell(&metadata.config, task.points, &mut cell);
 
-                    let points_after = cell.header().total_number_of_points;
+                        let points_after = cell.header().total_number_of_points;
 
-                    let added_points = points_after - points_before;
-                    metadata.number_of_points += added_points as u64;
+                        let added_points = points_after - points_before;
+                        metadata.number_of_points += added_points as u64;
 
-                    log::debug!("Added {} points to cell {:?}", added_points, handle.id());
+                        log::debug!("Added {} points to cell {:?}", added_points, handle.id());
+
+                        remaining_points
+                    };
 
                     for (cell_index, points) in remaining_points {
                         let id = CellId {

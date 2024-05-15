@@ -39,7 +39,7 @@ where
                 PostUpdate,
                 (
                     (handle_load_events::<T>, handle_dropped_events::<T>).chain(),
-                    send_created_events::<T>,
+                    send_created_and_changed_events::<T>,
                 ),
             );
     }
@@ -191,6 +191,7 @@ where
     T: Asset,
 {
     Created { handle: AssetHandle<T> },
+    Changed { handle: AssetHandle<T> },
     Loaded(AssetLoadedEvent<T>),
 }
 
@@ -201,6 +202,9 @@ where
     fn clone(&self) -> Self {
         match self {
             AssetEvent::Created { handle } => AssetEvent::Created {
+                handle: handle.clone(),
+            },
+            AssetEvent::Changed { handle } => AssetEvent::Changed {
                 handle: handle.clone(),
             },
             AssetEvent::Loaded(loaded) => AssetEvent::Loaded(loaded.clone()),
@@ -249,13 +253,6 @@ where
         self.asset.as_ref().unwrap()
     }
 
-    pub fn asset_mut(&mut self) -> MutAsset<T> {
-        MutAsset {
-            asset: self.asset.as_mut().unwrap(),
-            change_status: &mut self.change_status,
-        }
-    }
-
     pub fn source(&self) -> &Source {
         &self.source
     }
@@ -266,8 +263,11 @@ pub struct MutAsset<'a, T>
 where
     T: Asset,
 {
+    handle: AssetHandle<T>,
     asset: &'a mut T,
     change_status: &'a mut AssetChangeStatus,
+    has_just_changed: bool,
+    just_changed: &'a mut FxHashSet<AssetHandle<T>>,
 }
 
 impl<'a, T> Deref for MutAsset<'a, T>
@@ -287,7 +287,19 @@ where
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         *self.change_status = AssetChangeStatus::Changed;
+        self.has_just_changed = true;
         self.asset
+    }
+}
+
+impl<'a, T> Drop for MutAsset<'a, T>
+where
+    T: Asset,
+{
+    fn drop(&mut self) {
+        if self.has_just_changed {
+            self.just_changed.insert(self.handle.clone());
+        }
     }
 }
 
@@ -311,6 +323,7 @@ where
 {
     store: FxHashMap<T::Id, AssetEntry<T>>,
     just_created: Vec<AssetHandle<T>>,
+    just_changed: FxHashSet<AssetHandle<T>>,
     load_channels: Channels<LoadAssetMsg<T>>,
     loaded_channels: Channels<LoadedAssetMsg<T>>,
     ref_count_channels: Channels<ChangeRefCount<T::Id>>,
@@ -338,6 +351,7 @@ where
         Self {
             store: FxHashMap::default(),
             just_created: Vec::default(),
+            just_changed: FxHashSet::default(),
             load_channels: Channels::default(),
             loaded_channels: Channels::default(),
             ref_count_channels: Channels::default(),
@@ -376,12 +390,24 @@ where
         handle
     }
 
-    pub fn get(&self, handle: &AssetHandle<T>) -> &AssetEntry<T> {
-        self.store.get(handle.id()).unwrap()
+    pub fn get_asset(&self, handle: &AssetHandle<T>) -> &T {
+        self.store.get(handle.id()).unwrap().asset.as_ref().unwrap()
     }
 
-    pub fn get_mut(&mut self, handle: &AssetHandle<T>) -> &mut AssetEntry<T> {
-        self.store.get_mut(handle.id()).unwrap()
+    pub fn get_asset_mut(&mut self, handle: &AssetHandle<T>) -> MutAsset<T> {
+        let entry = self.store.get_mut(handle.id()).unwrap();
+
+        MutAsset {
+            handle: handle.clone(),
+            asset: entry.asset.as_mut().unwrap(),
+            change_status: &mut entry.change_status,
+            has_just_changed: false,
+            just_changed: &mut self.just_changed,
+        }
+    }
+
+    pub fn get_asset_source(&self, handle: &AssetHandle<T>) -> &Source {
+        &self.store.get(handle.id()).unwrap().source
     }
 
     fn handle_load_events(
@@ -515,9 +541,19 @@ where
     }
 
     fn send_created_events(&mut self, event_writer: &mut EventWriter<AssetEvent<T>>) {
-        for handle in self.just_created.drain(..) {
-            event_writer.send(AssetEvent::Created { handle });
-        }
+        event_writer.send_batch(
+            self.just_created
+                .drain(..)
+                .map(|handle| AssetEvent::Created { handle }),
+        );
+    }
+
+    fn send_changed_events(&mut self, event_writer: &mut EventWriter<AssetEvent<T>>) {
+        event_writer.send_batch(
+            self.just_changed
+                .drain()
+                .map(|handle| AssetEvent::Changed { handle }),
+        );
     }
 
     fn handle_ref_count_events(&mut self) {
@@ -581,11 +617,12 @@ fn handle_loaded_events<T: Asset>(
     asset_manager.handle_loaded_events(&mut asset_events);
 }
 
-fn send_created_events<T: Asset>(
+fn send_created_and_changed_events<T: Asset>(
     mut asset_manager: AssetManagerResMut<T>,
     mut asset_events: EventWriter<AssetEvent<T>>,
 ) {
     asset_manager.send_created_events(&mut asset_events);
+    asset_manager.send_changed_events(&mut asset_events);
 }
 
 fn handle_dropped_events<T: Asset>(mut asset_manager: AssetManagerResMut<T>) {
