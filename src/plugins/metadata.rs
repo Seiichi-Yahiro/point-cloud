@@ -1,10 +1,9 @@
-use std::io::Read;
-
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemParam, SystemState};
 use bounding_volume::Aabb;
 use glam::Vec3;
+use std::io::Read;
 use thousands::Separable;
 
 use point_converter::metadata::Metadata;
@@ -34,6 +33,31 @@ impl Asset for Metadata {
             #[cfg(target_arch = "wasm32")]
             name: kind.to_string(),
         })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save(&self, source: Source) -> Result<(), SourceError> {
+        use std::fs::File;
+        use std::io::{BufWriter, ErrorKind, Write};
+
+        match source {
+            Source::Path(path) => {
+                log::debug!("Saving metadata at {:?}", path);
+
+                let file = File::create(path)?;
+                let mut buf_writer = BufWriter::new(file);
+                self.write_to(&mut buf_writer)
+                    .map_err(|err| SourceError::Other {
+                        message: err.to_string(),
+                        name: ErrorKind::InvalidData,
+                    })?;
+                buf_writer.flush().map_err(SourceError::from)
+            }
+            Source::URL(_) => {
+                todo!()
+            }
+            Source::None => Ok(()),
+        }
     }
 }
 
