@@ -628,3 +628,18 @@ fn send_created_and_changed_events<T: Asset>(
 fn handle_dropped_events<T: Asset>(mut asset_manager: AssetManagerResMut<T>) {
     asset_manager.handle_ref_count_events();
 }
+
+impl<T> Drop for AssetManager<T>
+where
+    T: Asset,
+{
+    fn drop(&mut self) {
+        for (_id, asset_entry) in self.store.iter() {
+            if asset_entry.change_status == AssetChangeStatus::Changed {
+                let asset = asset_entry.asset.as_ref().unwrap();
+                let source = asset_entry.source.clone();
+                let _ = asset.save(source);
+            }
+        }
+    }
+}
