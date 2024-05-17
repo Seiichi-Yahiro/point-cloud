@@ -3,6 +3,7 @@ pub use app::App;
 mod app;
 mod event_set;
 mod plugins;
+mod sorted_hash;
 mod texture;
 mod transform;
 

@@ -1,6 +1,4 @@
-use std::cmp::Ordering;
-use std::collections::BTreeSet;
-use std::hash::BuildHasherDefault;
+use std::hash::{BuildHasherDefault, Hash};
 use std::io::Read;
 
 use bevy_app::prelude::*;
@@ -29,6 +27,7 @@ use crate::plugins::metadata::{
 use crate::plugins::render::point::Point;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::Device;
+use crate::sorted_hash::SortedHashMap;
 use crate::transform::Transform;
 
 pub mod frustums;
@@ -81,6 +80,7 @@ impl Plugin for CellPlugin {
         app.add_plugins(AssetPlugin::<Cell>::default())
             .insert_state(StreamState::Enabled)
             .insert_resource(frustums::StreamingFrustumsScale::default())
+            .insert_resource(VisibleCells::default())
             .insert_resource(LoadedCells::default())
             .insert_resource(MissingCells::default())
             .insert_resource(LoadingCells::default())
@@ -163,6 +163,9 @@ enum StreamState {
 }
 
 #[derive(Default, Resource)]
+struct VisibleCells(FxHashSet<CellId>);
+
+#[derive(Default, Resource)]
 struct LoadedCells(FxHashMap<CellId, Entity>);
 
 #[derive(Resource)]
@@ -176,7 +179,7 @@ impl Default for MissingCells {
 
 #[derive(Resource)]
 struct LoadingCells {
-    should_load: BTreeSet<CellToLoad>,
+    should_load: SortedHashMap<CellId, u32, ()>,
     loading: FxHashSet<CellId>,
 }
 
@@ -187,47 +190,21 @@ impl LoadingCells {
 impl Default for LoadingCells {
     fn default() -> Self {
         Self {
-            should_load: BTreeSet::new(),
+            should_load: SortedHashMap::new(),
             loading: FxHashSet::with_capacity(Self::MAX_LOADING_SIZE),
         }
-    }
-}
-
-struct CellToLoad {
-    id: CellId,
-    priority: u32,
-}
-
-impl PartialEq for CellToLoad {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for CellToLoad {}
-
-impl PartialOrd for CellToLoad {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for CellToLoad {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.id
-            .hierarchy
-            .cmp(&other.id.hierarchy)
-            .then(self.priority.cmp(&other.priority))
     }
 }
 
 fn cleanup_cells(
     mut commands: Commands,
     cell_query: Query<Entity, With<CellHeader>>,
+    mut visible_cells: ResMut<VisibleCells>,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
 ) {
+    visible_cells.0.clear();
     loading_cells.should_load.clear();
     loading_cells.loading.clear();
     loaded_cells.0.clear();
@@ -286,6 +263,7 @@ fn receive_cell(
     mut assets_events: EventReader<AssetEvent<Cell>>,
     device: Res<Device>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
+    visible_cells: Res<VisibleCells>,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
@@ -293,7 +271,21 @@ fn receive_cell(
     for event in assets_events.read() {
         match event {
             AssetEvent::Created { handle } => {
-                missing_cells.0.remove(handle.id());
+                let id = handle.id();
+                missing_cells.0.remove(id);
+
+                if visible_cells.0.contains(id) {
+                    log::debug!("Received created cell {:?}", id);
+                    loading_cells.should_load.remove(id);
+
+                    // TODO delay reading of cell
+                    let cell = cell_manager.get_asset(handle);
+                    let cell_bundle =
+                        CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
+                    let entity = commands.spawn(cell_bundle).id();
+
+                    loaded_cells.0.insert(*id, entity);
+                }
             }
             AssetEvent::Changed { handle } => {
                 if let Some(entity) = loaded_cells.0.get(handle.id()) {
@@ -353,6 +345,7 @@ fn receive_cell(
 
 fn update_cells(
     mut commands: Commands,
+    mut visible_cells: ResMut<VisibleCells>,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
@@ -369,7 +362,7 @@ fn update_cells(
         }
 
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
-        let mut new_should_load = BTreeSet::new();
+        let mut new_should_load = SortedHashMap::<CellId, u32, ()>::new();
 
         for (hierarchy, streaming_frustum) in streaming_frustums.iter().enumerate() {
             let hierarchy = hierarchy as u32;
@@ -382,7 +375,7 @@ fn update_cells(
             let min_cell_index = metadata.config.cell_index(frustum_aabb.min, cell_size);
             let max_cell_index = metadata.config.cell_index(frustum_aabb.max, cell_size);
 
-            let new_visible_cells = (min_cell_index.x..=max_cell_index.x)
+            visible_cells.0 = (min_cell_index.x..=max_cell_index.x)
                 .cartesian_product(min_cell_index.y..=max_cell_index.y)
                 .cartesian_product(min_cell_index.z..=max_cell_index.z)
                 .map(|((x, y), z)| IVec3::new(x, y, z))
@@ -390,29 +383,29 @@ fn update_cells(
                     hierarchy,
                     index: cell_index,
                 })
-                .filter(|cell_id| missing_cells.0.get(cell_id).is_none())
                 .filter(|cell_id| {
                     let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
                     let cell_aabb = Aabb::new(cell_pos - half_cell_size, cell_pos + half_cell_size);
                     !streaming_frustum.cull_aabb(cell_aabb)
                 })
-                .map(|cell_id| {
+                .collect();
+
+            let visible_not_missing_cells = visible_cells
+                .0
+                .iter()
+                .filter(|cell_id| missing_cells.0.get(cell_id).is_none());
+
+            for cell_id in visible_not_missing_cells {
+                if let Some(entity) = loaded_cells.0.remove(cell_id) {
+                    new_loaded.insert(*cell_id, entity);
+                } else if loading_cells.should_load.remove(&cell_id).is_some()
+                    || !loading_cells.loading.contains(cell_id)
+                {
                     let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
                     let distance_to_camera =
                         (cell_pos - transform.translation).length_squared() as u32;
-                    CellToLoad {
-                        id: cell_id,
-                        priority: distance_to_camera,
-                    }
-                });
 
-            for cell_to_load in new_visible_cells {
-                if let Some(entity) = loaded_cells.0.remove(&cell_to_load.id) {
-                    new_loaded.insert(cell_to_load.id, entity);
-                } else if loading_cells.should_load.remove(&cell_to_load)
-                    || !loading_cells.loading.contains(&cell_to_load.id)
-                {
-                    new_should_load.insert(cell_to_load);
+                    new_should_load.insert(*cell_id, distance_to_camera, ());
                 }
             }
         }
@@ -435,16 +428,16 @@ fn enqueue_cells_to_load(
 
     for _ in 0..free_load_slots {
         if let Some(cell_to_load) = loading_cells.should_load.pop_first() {
-            loading_cells.loading.insert(cell_to_load.id);
+            let cell_id = cell_to_load.keys.hash_key;
+            loading_cells.loading.insert(cell_id);
 
             let working_directory = active_metadata.get_working_directory();
-            let source =
-                working_directory.map_or(Source::None, |dir| dir.join(&cell_to_load.id.path()));
+            let source = working_directory.map_or(Source::None, |dir| dir.join(&cell_id.path()));
 
             cell_manager
                 .load_sender()
                 .send(LoadAssetMsg {
-                    id: cell_to_load.id,
+                    id: cell_id,
                     source,
                     reply_sender: None,
                 })
