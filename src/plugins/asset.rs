@@ -322,6 +322,7 @@ where
     T: Asset,
 {
     store: FxHashMap<T::Id, AssetEntry<T>>,
+    auto_save: bool,
     just_created: Vec<AssetHandle<T>>,
     just_changed: FxHashSet<AssetHandle<T>>,
     load_channels: Channels<LoadAssetMsg<T>>,
@@ -350,6 +351,7 @@ where
     fn default() -> Self {
         Self {
             store: FxHashMap::default(),
+            auto_save: false,
             just_created: Vec::default(),
             just_changed: FxHashSet::default(),
             load_channels: Channels::default(),
@@ -367,6 +369,10 @@ where
 {
     pub fn load_sender(&self) -> &Sender<LoadAssetMsg<T>> {
         &self.load_channels.sender
+    }
+
+    pub fn set_auto_save(&mut self, auto_save: bool) {
+        self.auto_save = auto_save;
     }
 
     #[must_use]
@@ -593,7 +599,7 @@ where
                 AssetLoadStatus::Loaded => {
                     let asset = entry.asset.unwrap();
 
-                    if entry.change_status == AssetChangeStatus::Changed {
+                    if self.auto_save && entry.change_status == AssetChangeStatus::Changed {
                         asset.save(entry.source).unwrap(); // TODO thread?
                     }
                 }
@@ -635,7 +641,7 @@ where
 {
     fn drop(&mut self) {
         for (_id, asset_entry) in self.store.iter() {
-            if asset_entry.change_status == AssetChangeStatus::Changed {
+            if self.auto_save && asset_entry.change_status == AssetChangeStatus::Changed {
                 let asset = asset_entry.asset.as_ref().unwrap();
                 let source = asset_entry.source.clone();
                 let _ = asset.save(source);

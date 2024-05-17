@@ -7,7 +7,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemId, SystemState};
 use caches::{Cache, LRUCache};
 use flume::{Receiver, Sender, TryRecvError};
-use rustc_hash::FxHasher;
+use rustc_hash::{FxHashMap, FxHasher};
 use thousands::Separable;
 
 use bounding_volume::Aabb;
@@ -36,6 +36,7 @@ impl Plugin for ConverterPlugin {
             files: vec![],
         })
         .insert_resource(Tasks::default())
+        .insert_resource(Settings::default())
         .insert_resource(CellCache::default())
         .insert_state(ConversionState::NotStarted)
         .add_systems(OnEnter(ConversionState::Converting), spawn_point_reader)
@@ -329,7 +330,7 @@ fn get_handles_for_new_tasks(
 
     while i < free_loading_spots {
         if let Some(cell_task) = tasks.new_tasks.pop_front() {
-            if let Some(handle) = cell_cache.cache.get(&cell_task.id) {
+            if let Some(handle) = cell_cache.get(&cell_task.id) {
                 tasks
                     .tasks_with_handle
                     .push_back((cell_task, handle.clone()));
@@ -374,7 +375,7 @@ fn get_handles_for_loading_tasks(
             match receiver.try_recv() {
                 Ok(loaded_asset_event) => match loaded_asset_event {
                     AssetLoadedEvent::Success { handle } => {
-                        cell_cache.cache.put(*handle.id(), handle.clone());
+                        cell_cache.insert(*handle.id(), handle.clone());
                         tasks.tasks_with_handle.push_back((cell_task, handle));
                     }
                     AssetLoadedEvent::Error { id, error } => {
@@ -408,7 +409,7 @@ fn get_handles_for_loading_tasks(
                             .map_or(Source::None, |dir| dir.join(&id.path()));
 
                         let handle = cell_manager.insert(id, cell, source);
-                        cell_cache.cache.put(id, handle.clone());
+                        cell_cache.insert(id, handle.clone());
                         tasks.tasks_with_handle.push_back((cell_task, handle));
                     }
                 },
@@ -427,15 +428,70 @@ fn get_handles_for_loading_tasks(
 }
 
 #[derive(Debug, Resource)]
-struct CellCache {
-    cache: LRUCache<CellId, AssetHandle<Cell>, BuildHasherDefault<FxHasher>>,
+enum CellCache {
+    LRU(LRUCache<CellId, AssetHandle<Cell>, BuildHasherDefault<FxHasher>>),
+    Map(FxHashMap<CellId, AssetHandle<Cell>>),
+}
+
+impl CellCache {
+    fn convert_to_lru(&mut self) {
+        match self {
+            CellCache::LRU(_) => {}
+            CellCache::Map(it) => {
+                let mut lru = LRUCache::with_hasher(100, BuildHasherDefault::default()).unwrap();
+
+                for (id, handle) in it.drain().take(100) {
+                    lru.put(id, handle);
+                }
+
+                *self = CellCache::LRU(lru);
+            }
+        }
+    }
+
+    fn convert_to_map(&mut self) {
+        match self {
+            CellCache::LRU(it) => {
+                let mut map = FxHashMap::with_capacity_and_hasher(
+                    it.cap() * 2,
+                    BuildHasherDefault::default(),
+                );
+
+                while let Some((id, handle)) = it.remove_lru() {
+                    map.insert(id, handle);
+                }
+
+                *self = CellCache::Map(map);
+            }
+            CellCache::Map(_) => {}
+        }
+    }
+
+    fn insert(&mut self, id: CellId, handle: AssetHandle<Cell>) {
+        match self {
+            CellCache::LRU(it) => {
+                it.put(id, handle);
+            }
+            CellCache::Map(it) => {
+                it.insert(id, handle);
+            }
+        }
+    }
+
+    fn get(&mut self, id: &CellId) -> Option<&AssetHandle<Cell>> {
+        match self {
+            CellCache::LRU(it) => it.get(id),
+            CellCache::Map(it) => it.get(id),
+        }
+    }
 }
 
 impl Default for CellCache {
     fn default() -> Self {
-        Self {
-            cache: LRUCache::with_hasher(100, BuildHasherDefault::default()).unwrap(),
-        }
+        Self::Map(FxHashMap::with_capacity_and_hasher(
+            100,
+            BuildHasherDefault::default(),
+        ))
     }
 }
 
@@ -480,6 +536,17 @@ fn add_points_to_cell_system(
     }
 }
 
+#[derive(Debug, Resource)]
+struct Settings {
+    auto_save: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { auto_save: false }
+    }
+}
+
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
     if ui.button("New point cloud").clicked() {
         let mut params = SystemState::<(
@@ -488,15 +555,36 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         )>::new(world);
 
         let (mut next_metadata_state, mut metadata_manager) = params.get_mut(world);
-        let _ = metadata_manager.insert(
-            "Unknown".to_string(),
-            Metadata::default(),
-            Source::Path(std::path::PathBuf::from(
-                "C:/Users/Julian/RustroverProjects/point-cloud/clouds/usc_converted2/metadata.json",
-            )),
-        );
+        let _ = metadata_manager.insert("Unknown".to_string(), Metadata::default(), Source::None);
         next_metadata_state.set(MetadataState::Loading);
     }
+
+    {
+        let mut params = SystemState::<(
+            ResMut<Settings>,
+            ResMut<CellCache>,
+            AssetManagerResMut<Metadata>,
+            AssetManagerResMut<Cell>,
+        )>::new(world);
+
+        let (mut settings, mut cell_cache, mut metadata_manager, mut cell_manager) =
+            params.get_mut(world);
+
+        let mut auto_save = settings.auto_save;
+        if ui.checkbox(&mut auto_save, "Auto save").changed() {
+            settings.auto_save = auto_save;
+            metadata_manager.set_auto_save(auto_save);
+            cell_manager.set_auto_save(auto_save);
+
+            if auto_save {
+                cell_cache.convert_to_lru();
+            } else {
+                cell_cache.convert_to_map();
+            }
+        }
+    }
+
+    ui.separator();
 
     if ui.button("Choose files to convert...").clicked() {
         select_files(world);
