@@ -688,23 +688,35 @@ fn list_files(ui: &mut egui::Ui, world: &mut World) {
                     .and_then(|it| it.to_str())
                     .unwrap();
 
-                let (status, remaining) = match &file_to_convert.status {
-                    FileConversionStatus::NotStarted => ("⌛", None),
-                    FileConversionStatus::Converting { remaining, .. } => ("⏳", Some(*remaining)),
-                    FileConversionStatus::Finished => ("✔", None),
-                    FileConversionStatus::Failed { remaining, .. } => ("✖", Some(*remaining)),
+                match &file_to_convert.status {
+                    FileConversionStatus::NotStarted => {
+                        ui.label(format!("⌛\u{00A0}{}", file_name));
+                    }
+                    FileConversionStatus::Converting { remaining, total } => {
+                        ui.label(format!(
+                            "⏳\u{00A0}{}\nRemaining: {}",
+                            file_name,
+                            remaining.separate_with_commas()
+                        ))
+                        .on_hover_text(format!("Total points: {}", total.separate_with_commas()));
+                    }
+                    FileConversionStatus::Finished => {
+                        ui.label(format!("✔\u{00A0}{}", file_name));
+                    }
+                    FileConversionStatus::Failed {
+                        error,
+                        total,
+                        remaining,
+                    } => {
+                        ui.label(format!("✖\u{00A0}{}", file_name))
+                            .on_hover_text(format!(
+                                "{}\nConverted points: {}/{}",
+                                error,
+                                (total - remaining).separate_with_commas(),
+                                total.separate_with_commas()
+                            ));
+                    }
                 };
-
-                if let Some(remaining) = remaining {
-                    ui.label(format!(
-                        "{}\u{00A0}{}: {}",
-                        status,
-                        file_name,
-                        remaining.separate_with_commas()
-                    ));
-                } else {
-                    ui.label(format!("{}\u{00A0}{}", status, file_name));
-                }
             }
         },
     );
