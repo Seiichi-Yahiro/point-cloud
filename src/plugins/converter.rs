@@ -586,34 +586,48 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
 
     ui.separator();
 
-    if ui.button("Choose files to convert...").clicked() {
+    let conversion_state = *world
+        .get_resource::<State<ConversionState>>()
+        .unwrap()
+        .get();
+
+    let choose_files_to_convert_button = egui::Button::new("Choose files to convert...");
+
+    let enable_select_files = match conversion_state {
+        ConversionState::NotStarted | ConversionState::Finished => true,
+        ConversionState::Converting => false,
+    };
+
+    if ui
+        .add_enabled(enable_select_files, choose_files_to_convert_button)
+        .clicked()
+    {
         select_files(world);
     }
 
-    let mut params = SystemState::<(
-        Res<FilesToConvert>,
-        Res<State<ConversionState>>,
-        ResMut<NextState<ConversionState>>,
-    )>::new(world);
+    {
+        let mut params =
+            SystemState::<(Res<FilesToConvert>, ResMut<NextState<ConversionState>>)>::new(world);
 
-    let (files_to_convert, conversion_state, mut next_conversion_state) = params.get_mut(world);
+        let (files_to_convert, mut next_conversion_state) = params.get_mut(world);
 
-    match conversion_state.get() {
-        ConversionState::NotStarted => {
-            let button = egui::Button::new("Start converting");
-            if ui
-                .add_enabled(!files_to_convert.files.is_empty(), button)
-                .clicked()
-            {
-                next_conversion_state.set(ConversionState::Converting);
+        match conversion_state {
+            ConversionState::NotStarted => {
+                let button = egui::Button::new("Start converting");
+                if ui
+                    .add_enabled(!files_to_convert.files.is_empty(), button)
+                    .clicked()
+                {
+                    next_conversion_state.set(ConversionState::Converting);
+                }
             }
-        }
-        ConversionState::Converting => {
-            if ui.button("Stop converting").clicked() {
-                next_conversion_state.set(ConversionState::Finished);
+            ConversionState::Converting => {
+                if ui.button("Stop converting").clicked() {
+                    next_conversion_state.set(ConversionState::Finished);
+                }
             }
+            ConversionState::Finished => {}
         }
-        ConversionState::Finished => {}
     }
 
     ui.collapsing("Files to convert", |ui| {
@@ -635,8 +649,15 @@ fn select_files(world: &mut World) {
     };
 
     if let Some(files) = files {
-        let mut files_to_convert = world.get_resource_mut::<FilesToConvert>().unwrap();
+        let mut params =
+            SystemState::<(ResMut<FilesToConvert>, ResMut<NextState<ConversionState>>)>::new(world);
+        let (mut files_to_convert, mut next_conversion_state) = params.get_mut(world);
+
+        next_conversion_state.set(ConversionState::NotStarted);
+
         files_to_convert.current = 0;
+        files_to_convert.finished_reading = false;
+
         files_to_convert.files = files
             .into_iter()
             .map(|file| FileToConvert {
