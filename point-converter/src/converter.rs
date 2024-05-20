@@ -64,7 +64,7 @@ pub fn add_points_to_cell(
     points: Vec<Point>,
     cell: &mut Cell,
 ) -> FxHashMap<IVec3, Vec<Point>> {
-    let overflow_points = cell.add_points(points, config);
+    let overflow_points = cell.add_points(points);
     let overflow_points = group_points(overflow_points, cell.header().id.hierarchy + 1, config);
     cell.add_points_in_overflow(overflow_points, config)
 }

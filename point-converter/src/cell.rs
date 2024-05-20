@@ -72,10 +72,10 @@ impl Cell {
         self.points.iter().chain(self.overflow_points())
     }
 
-    pub fn add_point(&mut self, point: Point, config: &MetadataConfig) -> bool {
+    pub fn add_point(&mut self, point: Point) -> bool {
         let sub_grid_index = self
             .header
-            .sub_grid_index_for_point(point, config.sub_grid_dimension);
+            .sub_grid_index_for_point(point, self.header.sub_grid_dimension);
 
         if self.points_grid.insert(sub_grid_index) {
             self.points.push(point);
@@ -88,11 +88,11 @@ impl Cell {
         false
     }
 
-    pub fn add_points(&mut self, points: Vec<Point>, config: &MetadataConfig) -> Vec<Point> {
+    pub fn add_points(&mut self, points: Vec<Point>) -> Vec<Point> {
         let mut overflow_points = Vec::with_capacity(points.capacity());
 
         for point in points {
-            if !self.add_point(point, config) {
+            if !self.add_point(point) {
                 overflow_points.push(point);
             }
         }
