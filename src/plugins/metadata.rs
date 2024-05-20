@@ -1,6 +1,6 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::{SystemParam, SystemState};
+use bevy_ecs::system::{RunSystemOnce, SystemParam, SystemState};
 use bounding_volume::Aabb;
 use glam::Vec3;
 use std::io::Read;
@@ -345,6 +345,10 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         ui.label(format!("y: {}", extends.y));
         ui.label(format!("z: {}", extends.z));
     });
+
+    if ui.button("Look at bounding box").clicked() {
+        world.run_system_once(look_at_bounding_box);
+    }
 
     select_metadata(ui, world);
 }
