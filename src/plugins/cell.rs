@@ -63,10 +63,11 @@ impl Asset for Cell {
                 self.write_to(&mut buf_writer)?;
                 buf_writer.flush().map_err(SourceError::from)
             }
-            Source::URL(_) => {
-                todo!()
-            }
-            Source::None => Ok(()),
+            Source::URL(_) => Err(SourceError::Other {
+                message: "URL saving is not supported".to_string(),
+                name: ErrorKind::Unsupported,
+            }),
+            Source::None => Err(SourceError::NoSource),
         }
     }
 }

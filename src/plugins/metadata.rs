@@ -53,10 +53,11 @@ impl Asset for Metadata {
                     })?;
                 buf_writer.flush().map_err(SourceError::from)
             }
-            Source::URL(_) => {
-                todo!()
-            }
-            Source::None => Ok(()),
+            Source::URL(_) => Err(SourceError::Other {
+                message: "URL saving is not supported".to_string(),
+                name: ErrorKind::Unsupported,
+            }),
+            Source::None => Err(SourceError::NoSource),
         }
     }
 }
@@ -176,6 +177,9 @@ pub struct LoadedMetadata {
 }
 
 impl LoadedMetadata {
+    pub fn get_active(&self) -> &AssetHandle<Metadata> {
+        &self.active
+    }
     pub fn set_active(&mut self, handle: AssetHandle<Metadata>) {
         self.active = handle;
     }

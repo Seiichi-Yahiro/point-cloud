@@ -241,7 +241,7 @@ where
 {
     source: Source,
     load_status: AssetLoadStatus,
-    change_status: AssetChangeStatus,
+    is_saved: bool,
     asset: Option<T>,
 }
 
@@ -265,7 +265,7 @@ where
 {
     handle: AssetHandle<T>,
     asset: &'a mut T,
-    change_status: &'a mut AssetChangeStatus,
+    is_saved: &'a mut bool,
     has_just_changed: bool,
     just_changed: &'a mut FxHashSet<AssetHandle<T>>,
 }
@@ -286,7 +286,7 @@ where
     T: Asset,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        *self.change_status = AssetChangeStatus::Changed;
+        *self.is_saved = false;
         self.has_just_changed = true;
         self.asset
     }
@@ -307,12 +307,6 @@ where
 enum AssetLoadStatus {
     Loading,
     Loaded,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-enum AssetChangeStatus {
-    UnChanged,
-    Changed,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(Resource))]
@@ -375,6 +369,33 @@ where
         self.auto_save = auto_save;
     }
 
+    pub fn save_all(&mut self) {
+        for (id, entry) in self.store.iter_mut() {
+            if entry.is_saved {
+                continue;
+            }
+
+            let Some(asset) = &entry.asset else {
+                continue;
+            };
+
+            match asset.save(entry.source.clone()) {
+                Ok(_) => {
+                    entry.is_saved = true;
+                }
+                Err(err) => {
+                    log::error!("Failed to save asset {:?}: {}", id, err);
+                }
+            }
+        }
+    }
+
+    pub fn set_source(&mut self, handle: &AssetHandle<T>, source: Source) {
+        let entry = self.store.get_mut(handle.id()).unwrap();
+        entry.source = source;
+        entry.is_saved = false;
+    }
+
     #[must_use]
     pub fn insert(&mut self, id: T::Id, asset: T, source: Source) -> AssetHandle<T> {
         self.store.insert(
@@ -382,7 +403,7 @@ where
             AssetEntry {
                 source,
                 load_status: AssetLoadStatus::Loaded,
-                change_status: AssetChangeStatus::Changed,
+                is_saved: false,
                 asset: Some(asset),
             },
         );
@@ -406,7 +427,7 @@ where
         MutAsset {
             handle: handle.clone(),
             asset: entry.asset.as_mut().unwrap(),
-            change_status: &mut entry.change_status,
+            is_saved: &mut entry.is_saved,
             has_just_changed: false,
             just_changed: &mut self.just_changed,
         }
@@ -449,7 +470,7 @@ where
                         entry.insert(AssetEntry {
                             source: msg.source.clone(),
                             load_status: AssetLoadStatus::Loading,
-                            change_status: AssetChangeStatus::UnChanged,
+                            is_saved: true,
                             asset: None,
                         });
 
@@ -599,7 +620,7 @@ where
                 AssetLoadStatus::Loaded => {
                     let asset = entry.asset.unwrap();
 
-                    if self.auto_save && entry.change_status == AssetChangeStatus::Changed {
+                    if self.auto_save && !entry.is_saved {
                         asset.save(entry.source).unwrap(); // TODO thread?
                     }
                 }
@@ -640,12 +661,8 @@ where
     T: Asset,
 {
     fn drop(&mut self) {
-        for (_id, asset_entry) in self.store.iter() {
-            if self.auto_save && asset_entry.change_status == AssetChangeStatus::Changed {
-                let asset = asset_entry.asset.as_ref().unwrap();
-                let source = asset_entry.source.clone();
-                let _ = asset.save(source);
-            }
+        if self.auto_save {
+            self.save_all();
         }
     }
 }

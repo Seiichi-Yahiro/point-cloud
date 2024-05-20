@@ -20,7 +20,9 @@ use crate::plugins::asset::source::{Source, SourceError};
 use crate::plugins::asset::{
     AssetHandle, AssetLoadedEvent, AssetManagerRes, AssetManagerResMut, LoadAssetMsg,
 };
-use crate::plugins::metadata::{ActiveMetadata, MetadataState, UpdateMetadataEvent};
+use crate::plugins::metadata::{
+    ActiveMetadata, LoadedMetadata, MetadataState, UpdateMetadataEvent,
+};
 use crate::plugins::thread_pool::ThreadPool;
 
 pub struct ConverterPlugin;
@@ -52,7 +54,12 @@ impl Plugin for ConverterPlugin {
             )
                 .chain()
                 .run_if(in_state(ConversionState::Converting)),
-        );
+        )
+        .add_systems(
+            OnExit(ConversionState::Converting),
+            save.run_if(|settings: Res<Settings>| settings.auto_save),
+        )
+        .add_systems(OnEnter(MetadataState::Loaded), disable_auto_save);
     }
 }
 
@@ -318,6 +325,26 @@ fn check_if_converting_file_is_finished(
     }
 }
 
+fn save(
+    mut metadata_manager: AssetManagerResMut<Metadata>,
+    mut cell_manager: AssetManagerResMut<Cell>,
+) {
+    metadata_manager.save_all();
+    cell_manager.save_all();
+}
+
+fn disable_auto_save(
+    mut metadata_manager: AssetManagerResMut<Metadata>,
+    mut cell_manager: AssetManagerResMut<Cell>,
+    mut settings: ResMut<Settings>,
+    mut cell_cache: ResMut<CellCache>,
+) {
+    settings.auto_save = false;
+    cell_cache.convert_to_map();
+    metadata_manager.set_auto_save(false);
+    cell_manager.set_auto_save(false);
+}
+
 fn get_handles_for_new_tasks(
     active_metadata: ActiveMetadata,
     mut tasks: ResMut<Tasks>,
@@ -434,6 +461,13 @@ enum CellCache {
 }
 
 impl CellCache {
+    fn iter(&self) -> Box<dyn Iterator<Item = (&CellId, &AssetHandle<Cell>)> + '_> {
+        match self {
+            CellCache::LRU(it) => Box::new(it.iter()),
+            CellCache::Map(it) => Box::new(it.iter()),
+        }
+    }
+
     fn convert_to_lru(&mut self) {
         match self {
             CellCache::LRU(_) => {}
@@ -548,7 +582,22 @@ impl Default for Settings {
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
-    if ui.button("New point cloud").clicked() {
+    let conversion_state = *world
+        .get_resource::<State<ConversionState>>()
+        .unwrap()
+        .get();
+
+    let is_converting = match conversion_state {
+        ConversionState::NotStarted | ConversionState::Finished => false,
+        ConversionState::Converting => true,
+    };
+
+    let new_point_cloud_button = egui::Button::new("New point cloud");
+
+    if ui
+        .add_enabled(!is_converting, new_point_cloud_button)
+        .clicked()
+    {
         let mut params = SystemState::<(
             ResMut<NextState<MetadataState>>,
             AssetManagerResMut<Metadata>,
@@ -563,15 +612,63 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         let mut params = SystemState::<(
             ResMut<Settings>,
             ResMut<CellCache>,
+            Res<LoadedMetadata>,
             AssetManagerResMut<Metadata>,
             AssetManagerResMut<Cell>,
         )>::new(world);
 
-        let (mut settings, mut cell_cache, mut metadata_manager, mut cell_manager) =
+        if ui.button("Save at...").clicked() {
+            let window: &winit::window::Window = world
+                .get_resource::<crate::plugins::winit::Window>()
+                .unwrap();
+
+            let folder = rfd::FileDialog::new().set_parent(window).pick_folder();
+
+            if let Some(folder) = folder {
+                let (
+                    mut settings,
+                    mut cell_cache,
+                    loaded_metadata,
+                    mut metadata_manager,
+                    mut cell_manager,
+                ) = params.get_mut(world);
+
+                let source = Source::Path(
+                    folder
+                        .join(Metadata::FILE_NAME)
+                        .with_extension(Metadata::EXTENSION),
+                );
+
+                metadata_manager.set_source(loaded_metadata.get_active(), source);
+                metadata_manager.set_auto_save(true);
+                metadata_manager.save_all();
+
+                for (id, handle) in cell_cache.iter() {
+                    let source = Source::Path(folder.join(id.path()));
+                    cell_manager.set_source(handle, source);
+                }
+
+                cell_manager.set_auto_save(true);
+                cell_manager.save_all();
+
+                cell_cache.convert_to_map();
+                settings.auto_save = true;
+            }
+        }
+
+        let (mut settings, mut cell_cache, loaded_metadata, mut metadata_manager, mut cell_manager) =
             params.get_mut(world);
 
         let mut auto_save = settings.auto_save;
-        if ui.checkbox(&mut auto_save, "Auto save").changed() {
+        let checkbox = egui::Checkbox::new(&mut auto_save, "Auto save");
+
+        let metadata_source = metadata_manager.get_asset_source(loaded_metadata.get_active());
+        let auto_save_enabled = match metadata_source {
+            Source::Path(_) => true,
+            Source::URL(_) | Source::None => false,
+        };
+
+        if ui.add_enabled(auto_save_enabled, checkbox).changed() {
             settings.auto_save = auto_save;
             metadata_manager.set_auto_save(auto_save);
             cell_manager.set_auto_save(auto_save);
@@ -586,20 +683,10 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
 
     ui.separator();
 
-    let conversion_state = *world
-        .get_resource::<State<ConversionState>>()
-        .unwrap()
-        .get();
-
     let choose_files_to_convert_button = egui::Button::new("Choose files to convert...");
 
-    let enable_select_files = match conversion_state {
-        ConversionState::NotStarted | ConversionState::Finished => true,
-        ConversionState::Converting => false,
-    };
-
     if ui
-        .add_enabled(enable_select_files, choose_files_to_convert_button)
+        .add_enabled(!is_converting, choose_files_to_convert_button)
         .clicked()
     {
         select_files(world);
