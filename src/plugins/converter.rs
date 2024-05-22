@@ -62,7 +62,9 @@ impl Plugin for ConverterPlugin {
         )
         .add_systems(
             OnExit(ConversionState::Converting),
-            save.run_if(|settings: Res<Settings>| settings.auto_save),
+            (save, clear_cache)
+                .chain()
+                .run_if(|settings: Res<Settings>| settings.auto_save),
         )
         .add_systems(OnEnter(MetadataState::Loaded), disable_auto_save);
     }
@@ -342,6 +344,10 @@ fn save(
     cell_manager.save_all();
 }
 
+fn clear_cache(mut cell_cache: ResMut<CellCache>) {
+    cell_cache.clear();
+}
+
 fn disable_auto_save(
     mut metadata_manager: AssetManagerResMut<Metadata>,
     mut cell_manager: AssetManagerResMut<Cell>,
@@ -525,6 +531,15 @@ impl CellCache {
         match self {
             CellCache::LRU(it) => it.get(id),
             CellCache::Map(it) => it.get(id),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            CellCache::LRU(it) => it.purge(),
+            CellCache::Map(it) => {
+                it.clear();
+            }
         }
     }
 }
