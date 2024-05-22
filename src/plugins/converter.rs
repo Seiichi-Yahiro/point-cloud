@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 use std::hash::BuildHasherDefault;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemId, SystemState};
 use caches::{Cache, LRUCache};
-use flume::{Receiver, Sender, TryRecvError};
+use flume::{Receiver, TryRecvError};
+use parking_lot::Mutex;
 use rustc_hash::{FxHashMap, FxHasher};
 use thousands::Separable;
 
@@ -29,19 +31,22 @@ pub struct ConverterPlugin;
 
 impl Plugin for ConverterPlugin {
     fn build(&self, app: &mut App) {
-        let spawn_point_reader_system_id = app.world.register_system(spawn_point_reader);
+        let next_file_system_id = app.world.register_system(next_file);
+        let read_batch_system_id = app.world.register_system(read_batch);
 
         app.insert_resource(FilesToConvert {
-            spawn_point_reader: spawn_point_reader_system_id,
+            next_file: next_file_system_id,
+            read_batch: read_batch_system_id,
             current: 0,
-            finished_reading: false,
             files: vec![],
         })
+        .insert_resource(PointBatchReceiver(None))
+        .insert_resource(PointReader(None))
         .insert_resource(Tasks::default())
         .insert_resource(Settings::default())
         .insert_resource(CellCache::default())
         .insert_state(ConversionState::NotStarted)
-        .add_systems(OnEnter(ConversionState::Converting), spawn_point_reader)
+        .add_systems(OnEnter(ConversionState::Converting), next_file)
         .add_systems(
             Update,
             (
@@ -50,7 +55,7 @@ impl Plugin for ConverterPlugin {
                 get_handles_for_loading_tasks,
                 add_points_to_cell_system,
                 handle_added_points_for_converting_file,
-                check_if_converting_file_is_finished,
+                check_if_tasks_are_finished,
             )
                 .chain()
                 .run_if(in_state(ConversionState::Converting)),
@@ -91,97 +96,145 @@ struct FileToConvert {
     status: FileConversionStatus,
 }
 
+impl FileToConvert {
+    fn create_reader(&self) -> Option<Box<dyn BatchedPointReader + Send>> {
+        point_converter::get_batched_point_reader(&self.path)
+    }
+}
+
 #[derive(Debug, Resource)]
 struct FilesToConvert {
-    spawn_point_reader: SystemId,
+    next_file: SystemId,
+    read_batch: SystemId,
     current: usize,
-    finished_reading: bool,
     files: Vec<FileToConvert>,
 }
 
 impl FilesToConvert {
-    fn current(&self) -> &FileToConvert {
-        &self.files[self.current]
-    }
-
     fn current_mut(&mut self) -> &mut FileToConvert {
-        &mut self.files[self.current]
-    }
-
-    fn create_reader(&self) -> Option<Box<dyn BatchedPointReader + Send>> {
-        point_converter::get_batched_point_reader(&self.current().path)
+        &mut self.files[self.current - 1]
     }
 
     fn next(&mut self) -> bool {
         self.current += 1;
-        self.finished_reading = false;
-        self.current < self.files.len()
+        self.current <= self.files.len()
     }
 }
 
-fn spawn_point_reader(
-    mut files_to_convert: ResMut<FilesToConvert>,
-    thread_pool: Res<ThreadPool>,
-    tasks: Res<Tasks>,
-    active_metadata: ActiveMetadata,
-) {
-    let task_sender = tasks.task_sender.clone();
+#[derive(Resource)]
+struct PointReader(Option<Arc<Mutex<Box<dyn BatchedPointReader + Send>>>>);
 
-    let Some(mut reader) = files_to_convert.create_reader() else {
-        let msg = "File type not supported";
-        let error = std::io::Error::new(std::io::ErrorKind::Unsupported, msg);
-        task_sender.send(TaskMsg::Failed(error)).unwrap();
+fn next_file(
+    mut commands: Commands,
+    mut files_to_convert: ResMut<FilesToConvert>,
+    mut point_reader: ResMut<PointReader>,
+    mut next_conversion_state: ResMut<NextState<ConversionState>>,
+) {
+    loop {
+        if files_to_convert.next() {
+            let current_file = files_to_convert.current_mut();
+
+            if let Some(reader) = current_file.create_reader() {
+                let total_points = reader.total_points();
+
+                point_reader.0 = Some(Arc::new(Mutex::new(reader)));
+
+                current_file.status = FileConversionStatus::Converting {
+                    total: total_points,
+                    remaining: total_points,
+                };
+
+                commands.run_system(files_to_convert.read_batch);
+
+                break;
+            } else {
+                let msg = "File type not supported";
+                let error = std::io::Error::new(std::io::ErrorKind::Unsupported, msg);
+
+                current_file.status = FileConversionStatus::Failed {
+                    error,
+                    total: 0,
+                    remaining: 0,
+                };
+            }
+        } else {
+            point_reader.0 = None;
+            next_conversion_state.set(ConversionState::Finished);
+            break;
+        }
+    }
+}
+
+fn read_batch(
+    mut commands: Commands,
+    point_reader: Res<PointReader>,
+    thread_pool: Res<ThreadPool>,
+    mut point_batch_receiver: ResMut<PointBatchReceiver>,
+    active_metadata: ActiveMetadata,
+    mut files_to_convert: ResMut<FilesToConvert>,
+) {
+    let Some(reader) = &point_reader.0 else {
         return;
     };
 
-    let total_points = reader.total_points();
+    let remaining_points = reader.lock().remaining_points();
+    if remaining_points == 0 {
+        let file_to_convert = files_to_convert.current_mut();
+        file_to_convert.status = FileConversionStatus::Finished;
 
-    files_to_convert.current_mut().status = FileConversionStatus::Converting {
-        total: total_points,
-        remaining: total_points,
-    };
+        commands.run_system(files_to_convert.next_file);
+        return;
+    }
 
+    let reader = Arc::clone(reader);
     let config = active_metadata.get().config.clone();
 
-    thread_pool.execute(move || loop {
-        match reader.get_batch(100_000) {
-            Ok(points) => {
-                if points.is_empty() {
-                    task_sender.send(TaskMsg::Finished).unwrap();
-                    break;
-                } else {
-                    let aabb = Aabb::from(points.iter().map(|point| point.pos)).unwrap();
-                    task_sender.send(TaskMsg::UpdateBoundingBox(aabb)).unwrap();
+    let (sender, receiver) = flume::bounded(1);
+    point_batch_receiver.0 = Some(receiver);
 
-                    let grouped_points = group_points(points, 0, &config);
+    thread_pool.execute(move || {
+        let result = reader.lock().get_batch(500_000).map(|points| {
+            let aabb = Aabb::from(points.iter().map(|point| point.pos)).unwrap();
+            let grouped_points = group_points(points, 0, &config);
 
-                    for (cell_index, points) in grouped_points {
-                        let id = CellId {
-                            index: cell_index,
-                            hierarchy: 0,
-                        };
+            let tasks = grouped_points
+                .into_iter()
+                .map(|(cell_index, points)| {
+                    let id = CellId {
+                        index: cell_index,
+                        hierarchy: 0,
+                    };
 
-                        let cell_task = CellTask { id, points };
+                    CellTask { id, points }
+                })
+                .collect();
 
-                        task_sender.send(TaskMsg::CellTask(cell_task)).unwrap();
-                    }
-                }
-            }
-            Err(err) => {
-                log::error!("{:?}", err);
-                task_sender.send(TaskMsg::Failed(err)).unwrap();
-                break;
-            }
-        }
+            PointBatch { aabb, tasks }
+        });
+
+        sender.send(result).unwrap();
     });
 }
 
+fn check_if_tasks_are_finished(
+    mut commands: Commands,
+    point_batch_receiver: Res<PointBatchReceiver>,
+    files_to_convert: Res<FilesToConvert>,
+    tasks: Res<Tasks>,
+) {
+    if point_batch_receiver.0.is_none()
+        && tasks.new_tasks.is_empty()
+        && tasks.tasks_with_loading_handle.is_empty()
+        && tasks.tasks_with_handle.is_empty()
+    {
+        commands.run_system(files_to_convert.read_batch);
+    }
+}
+
 #[derive(Debug)]
-enum TaskMsg {
-    UpdateBoundingBox(Aabb),
-    CellTask(CellTask),
-    Failed(std::io::Error),
-    Finished,
+struct PointBatch {
+    aabb: Aabb,
+    tasks: Vec<CellTask>,
 }
 
 #[derive(Debug)]
@@ -190,84 +243,74 @@ struct CellTask {
     points: Vec<Point>,
 }
 
+#[derive(Resource)]
+struct PointBatchReceiver(Option<Receiver<Result<PointBatch, std::io::Error>>>);
+
 #[derive(Debug, Resource)]
 struct Tasks {
     new_tasks: VecDeque<CellTask>,
     tasks_with_handle: VecDeque<(CellTask, AssetHandle<Cell>)>,
     tasks_with_loading_handle: VecDeque<(CellTask, Receiver<AssetLoadedEvent<Cell>>)>,
-    task_sender: Sender<TaskMsg>,
-    task_receiver: Receiver<TaskMsg>,
 }
 
 impl Default for Tasks {
     fn default() -> Self {
-        let (task_sender, task_receiver) = flume::bounded(25);
-
         Self {
             new_tasks: VecDeque::default(),
             tasks_with_handle: VecDeque::default(),
             tasks_with_loading_handle: VecDeque::default(),
-            task_sender,
-            task_receiver,
         }
     }
 }
 
 fn receive_tasks(
+    mut commands: Commands,
+    mut point_batch_receiver: ResMut<PointBatchReceiver>,
     mut tasks: ResMut<Tasks>,
     mut update_metadata: EventWriter<UpdateMetadataEvent>,
     mut files_to_convert: ResMut<FilesToConvert>,
 ) {
-    let free_spots = 10usize.saturating_sub(tasks.new_tasks.len());
-    let mut i = 0;
+    let Some(receiver) = point_batch_receiver.0.take() else {
+        return;
+    };
 
-    while i < free_spots {
-        match tasks.task_receiver.try_recv() {
-            Ok(TaskMsg::UpdateBoundingBox(aabb)) => {
-                update_metadata.send(UpdateMetadataEvent::ExtendBoundingBox(aabb));
+    match receiver.try_recv() {
+        Ok(result) => match result {
+            Ok(point_batch) => {
+                update_metadata.send(UpdateMetadataEvent::ExtendBoundingBox(point_batch.aabb));
+                tasks.new_tasks.extend(point_batch.tasks);
             }
-            Ok(TaskMsg::CellTask(cell_task)) => {
-                i += 1;
-                tasks.new_tasks.push_back(cell_task);
-            }
-            Ok(TaskMsg::Finished) => {
-                files_to_convert.finished_reading = true;
-            }
-            Ok(TaskMsg::Failed(error)) => {
-                files_to_convert.finished_reading = true;
+            Err(error) => {
+                log::error!("{}", error);
 
                 let file_to_convert = files_to_convert.current_mut();
 
                 match file_to_convert.status {
-                    FileConversionStatus::NotStarted => {
-                        file_to_convert.status = FileConversionStatus::Failed {
-                            error,
-                            total: 0,
-                            remaining: 0,
-                        };
-                    }
                     FileConversionStatus::Converting { total, remaining } => {
                         file_to_convert.status = FileConversionStatus::Failed {
                             error,
                             total,
                             remaining,
                         };
-                    }
 
-                    FileConversionStatus::Finished => {
-                        unreachable!("Finished files don't fail")
+                        commands.run_system(files_to_convert.next_file);
                     }
-                    FileConversionStatus::Failed { .. } => {
-                        unreachable!("Failed files already failed");
+                    FileConversionStatus::NotStarted
+                    | FileConversionStatus::Finished
+                    | FileConversionStatus::Failed { .. } => {
+                        unreachable!(
+                            "Batches are only read from converting files: {:?}",
+                            file_to_convert.status
+                        );
                     }
                 }
             }
-            Err(TryRecvError::Empty) => {
-                break;
-            }
-            Err(TryRecvError::Disconnected) => {
-                unreachable!("tasks always holds a sender")
-            }
+        },
+        Err(TryRecvError::Empty) => {
+            point_batch_receiver.0 = Some(receiver);
+        }
+        Err(TryRecvError::Disconnected) => {
+            log::error!("Point batch reader thread seems to have crashed");
         }
     }
 }
@@ -287,40 +330,6 @@ fn handle_added_points_for_converting_file(
                     unreachable!("Only converting and failed files can receive points");
                 }
             }
-        }
-    }
-}
-
-fn check_if_converting_file_is_finished(
-    mut commands: Commands,
-    mut next_conversion_state: ResMut<NextState<ConversionState>>,
-    mut files_to_convert: ResMut<FilesToConvert>,
-    tasks: Res<Tasks>,
-) {
-    if files_to_convert.finished_reading
-        && tasks.new_tasks.is_empty()
-        && tasks.tasks_with_loading_handle.is_empty()
-        && tasks.tasks_with_handle.is_empty()
-    {
-        let file_to_convert = files_to_convert.current_mut();
-
-        match file_to_convert.status {
-            FileConversionStatus::Converting { .. } => {
-                file_to_convert.status = FileConversionStatus::Finished;
-            }
-            FileConversionStatus::Failed { .. } => {}
-            FileConversionStatus::NotStarted => {
-                unreachable!();
-            }
-            FileConversionStatus::Finished => {
-                unreachable!()
-            }
-        }
-
-        if files_to_convert.next() {
-            commands.run_system(files_to_convert.spawn_point_reader);
-        } else {
-            next_conversion_state.set(ConversionState::Finished);
         }
     }
 }
@@ -743,7 +752,6 @@ fn select_files(world: &mut World) {
         next_conversion_state.set(ConversionState::NotStarted);
 
         files_to_convert.current = 0;
-        files_to_convert.finished_reading = false;
 
         files_to_convert.files = files
             .into_iter()
