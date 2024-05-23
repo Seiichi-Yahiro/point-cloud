@@ -1,5 +1,6 @@
 use std::hash::{BuildHasherDefault, Hash};
 use std::io::Read;
+use std::ops::RangeInclusive;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -163,8 +164,31 @@ enum StreamState {
     Paused,
 }
 
-#[derive(Default, Resource)]
-struct VisibleCells(FxHashSet<CellId>);
+#[derive(Debug, Default, Resource)]
+struct VisibleCells {
+    ranges: Vec<VisibleCellsRanges>,
+}
+
+#[derive(Debug, Clone)]
+struct VisibleCellsRanges {
+    x: RangeInclusive<i32>,
+    y: RangeInclusive<i32>,
+    z: RangeInclusive<i32>,
+}
+
+impl VisibleCellsRanges {
+    fn cartesian_product(&self) -> impl Iterator<Item = (i32, i32, i32)> {
+        self.x
+            .clone()
+            .cartesian_product(self.y.clone())
+            .cartesian_product(self.z.clone())
+            .map(|((x, y), z)| (x, y, z))
+    }
+
+    fn contains(&self, element: IVec3) -> bool {
+        self.x.contains(&element.x) && self.y.contains(&element.y) && self.z.contains(&element.z)
+    }
+}
 
 #[derive(Default, Resource)]
 struct LoadedCells(FxHashMap<CellId, Entity>);
@@ -205,7 +229,7 @@ fn cleanup_cells(
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
 ) {
-    visible_cells.0.clear();
+    visible_cells.ranges.clear();
     loading_cells.should_load.clear();
     loading_cells.loading.clear();
     loaded_cells.0.clear();
@@ -275,7 +299,12 @@ fn receive_cell(
                 let id = handle.id();
                 missing_cells.0.remove(id);
 
-                if visible_cells.0.contains(id) {
+                if visible_cells
+                    .ranges
+                    .get(id.hierarchy as usize)
+                    .map(|ranges| ranges.contains(id.index))
+                    .unwrap_or(false)
+                {
                     log::debug!("Received created cell {:?}", id);
                     loading_cells.should_load.remove(id);
 
@@ -364,6 +393,7 @@ fn update_cells(
 
         let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
         let mut new_should_load = SortedHashMap::<CellId, u32, ()>::new();
+        let mut new_visible_cells = Vec::with_capacity(metadata.hierarchies as usize);
 
         for (hierarchy, streaming_frustum) in streaming_frustums.iter().enumerate() {
             let hierarchy = hierarchy as u32;
@@ -376,10 +406,15 @@ fn update_cells(
             let min_cell_index = metadata.config.cell_index(frustum_aabb.min, cell_size);
             let max_cell_index = metadata.config.cell_index(frustum_aabb.max, cell_size);
 
-            visible_cells.0 = (min_cell_index.x..=max_cell_index.x)
-                .cartesian_product(min_cell_index.y..=max_cell_index.y)
-                .cartesian_product(min_cell_index.z..=max_cell_index.z)
-                .map(|((x, y), z)| IVec3::new(x, y, z))
+            let ranges = VisibleCellsRanges {
+                x: min_cell_index.x..=max_cell_index.x,
+                y: min_cell_index.y..=max_cell_index.y,
+                z: min_cell_index.z..=max_cell_index.z,
+            };
+
+            let visible_not_missing_cells = ranges
+                .cartesian_product()
+                .map(|(x, y, z)| IVec3::new(x, y, z))
                 .map(|cell_index| CellId {
                     hierarchy,
                     index: cell_index,
@@ -389,26 +424,23 @@ fn update_cells(
                     let cell_aabb = Aabb::new(cell_pos - half_cell_size, cell_pos + half_cell_size);
                     !streaming_frustum.cull_aabb(cell_aabb)
                 })
-                .collect();
-
-            let visible_not_missing_cells = visible_cells
-                .0
-                .iter()
                 .filter(|cell_id| missing_cells.0.get(cell_id).is_none());
 
             for cell_id in visible_not_missing_cells {
-                if let Some(entity) = loaded_cells.0.remove(cell_id) {
-                    new_loaded.insert(*cell_id, entity);
+                if let Some(entity) = loaded_cells.0.remove(&cell_id) {
+                    new_loaded.insert(cell_id, entity);
                 } else if loading_cells.should_load.remove(&cell_id).is_some()
-                    || !loading_cells.loading.contains(cell_id)
+                    || !loading_cells.loading.contains(&cell_id)
                 {
                     let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
                     let distance_to_camera =
                         (cell_pos - transform.translation).length_squared() as u32;
 
-                    new_should_load.insert(*cell_id, distance_to_camera, ());
+                    new_should_load.insert(cell_id, distance_to_camera, ());
                 }
             }
+
+            new_visible_cells.push(ranges);
         }
 
         for (_, entity) in loaded_cells.0.drain() {
@@ -417,6 +449,7 @@ fn update_cells(
 
         loaded_cells.0 = new_loaded;
         loading_cells.should_load = new_should_load;
+        visible_cells.ranges = new_visible_cells;
     }
 }
 
