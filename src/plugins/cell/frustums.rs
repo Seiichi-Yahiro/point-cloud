@@ -14,8 +14,8 @@ use crate::transform::Transform;
 pub struct StreamingFrustumsScale(f32);
 
 impl StreamingFrustumsScale {
-    const MIN: f32 = 1.0;
-    const MAX: f32 = 5.0;
+    pub const MIN: f32 = 1.0;
+    pub const MAX: f32 = 5.0;
 }
 
 impl Default for StreamingFrustumsScale {

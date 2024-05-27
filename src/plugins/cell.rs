@@ -21,6 +21,7 @@ use crate::plugins::asset::{
 };
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
+use crate::plugins::cell::frustums::StreamingFrustumsScale;
 use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};
 use crate::plugins::metadata::{
     ActiveMetadata, MetadataState, UpdatedMetadataBoundingBoxEvent, UpdatedMetadataHierarchiesEvent,
@@ -151,7 +152,7 @@ fn set_view_distance(
     mut camera_query: Query<&mut PerspectiveProjection, With<Camera>>,
 ) {
     for mut projection in camera_query.iter_mut() {
-        projection.far = active_metadata.get().config.max_cell_size;
+        projection.far = active_metadata.get().config.max_cell_size * StreamingFrustumsScale::MAX;
     }
 }
 
