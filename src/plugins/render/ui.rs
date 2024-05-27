@@ -14,7 +14,8 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
+        app.insert_resource(SidePanelOpened(true))
+            .add_systems(Startup, setup)
             .add_systems(PreUpdate, handle_input)
             .add_systems(Render, (prepare, ui, draw).chain().in_set(RenderPassSet));
 
@@ -84,42 +85,63 @@ fn prepare(mut egui: ResMut<Egui>, window: Res<Window>) {
     egui.context.begin_frame(raw_input);
 }
 
+#[derive(Resource)]
+struct SidePanelOpened(bool);
+
 fn ui(world: &mut World) {
-    egui::Window::new("UI")
-        .resizable(true)
-        .default_size((150.0, 200.0))
-        .vscroll(true)
-        .show(
-            &world.get_resource::<Egui>().unwrap().context.clone(),
-            |ui| {
-                crate::plugins::fps::draw_ui(ui, world);
+    let context = world.get_resource::<Egui>().unwrap().context.clone();
 
-                egui::CollapsingHeader::new("Metadata")
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        crate::plugins::metadata::draw_ui(ui, world);
+    world.resource_scope(|world, mut side_panel_opened: Mut<SidePanelOpened>| {
+        let response = egui::SidePanel::left("UI")
+            .resizable(true)
+            .width_range(150.0..=250.0)
+            .default_width(150.0)
+            .show_animated(&context, side_panel_opened.0, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    crate::plugins::fps::draw_ui(ui, world);
+
+                    egui::CollapsingHeader::new("Metadata")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            crate::plugins::metadata::draw_ui(ui, world);
+                        });
+
+                    egui::CollapsingHeader::new("Cells")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            crate::plugins::cell::draw_ui(ui, world);
+                        });
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    ui.collapsing("Converter", |ui| {
+                        crate::plugins::converter::draw_ui(ui, world);
                     });
 
-                egui::CollapsingHeader::new("Cells")
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        crate::plugins::cell::draw_ui(ui, world);
+                    ui.collapsing("Camera", |ui| {
+                        crate::plugins::camera::draw_ui(ui, world);
                     });
 
-                #[cfg(not(target_arch = "wasm32"))]
-                ui.collapsing("Converter", |ui| {
-                    crate::plugins::converter::draw_ui(ui, world);
+                    ui.collapsing("Debug", |ui| {
+                        crate::plugins::debug::draw_ui(ui, world);
+                    });
                 });
+            });
 
-                ui.collapsing("Camera", |ui| {
-                    crate::plugins::camera::draw_ui(ui, world);
-                });
-
-                ui.collapsing("Debug", |ui| {
-                    crate::plugins::debug::draw_ui(ui, world);
-                });
-            },
-        );
+        egui::Window::new("Hamburger")
+            .resizable(false)
+            .collapsible(false)
+            .title_bar(false)
+            .current_pos(egui::Pos2::new(
+                response.map_or(0.0, |it| it.response.rect.width()) + 1.0,
+                1.0,
+            ))
+            .frame(egui::Frame::none())
+            .show(&context, |ui| {
+                if ui.button("☰").clicked() {
+                    side_panel_opened.0 = !side_panel_opened.0;
+                }
+            });
+    });
 }
 
 fn draw(
