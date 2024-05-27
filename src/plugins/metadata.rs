@@ -4,6 +4,7 @@ use bevy_ecs::system::{RunSystemOnce, SystemParam, SystemState};
 use bounding_volume::Aabb;
 use glam::Vec3;
 use std::io::Read;
+use std::path::PathBuf;
 use thousands::Separable;
 
 use point_converter::metadata::Metadata;
@@ -203,8 +204,12 @@ fn get_working_directory(source: &Source) -> Option<Directory> {
         Source::Path(path) => Some(Directory::Path(path.parent().unwrap().to_path_buf())),
         #[cfg(target_arch = "wasm32")]
         Source::PathInDirectory { directory, .. } => Some(Directory::WebDir(directory.clone())),
-        Source::URL(_) => {
-            todo!()
+        Source::URL(url) => {
+            let path = PathBuf::from(url.path());
+            let dir = path.parent().unwrap();
+            let mut url = url.clone();
+            url.set_path(dir.to_str().unwrap());
+            Some(Directory::URL(url))
         }
         Source::None => None,
     }

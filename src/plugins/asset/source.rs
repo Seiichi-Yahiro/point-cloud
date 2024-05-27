@@ -1,6 +1,7 @@
 use crate::plugins::asset::Asset;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use url::Url;
 
 #[derive(Debug, Clone)]
 pub enum SourceError {
@@ -75,7 +76,7 @@ pub enum Directory {
     Path(std::path::PathBuf),
     #[cfg(target_arch = "wasm32")]
     WebDir(crate::web::WebDir),
-    URL(String),
+    URL(Url),
 }
 
 impl Directory {
@@ -88,8 +89,10 @@ impl Directory {
                 directory: dir.clone(),
                 path: path.to_path_buf(),
             },
-            Directory::URL(_) => {
-                todo!()
+            Directory::URL(url) => {
+                let mut url = url.clone();
+                url.set_path(path.to_str().unwrap());
+                Source::URL(url)
             }
         }
     }
@@ -106,7 +109,7 @@ pub enum Source {
         path: std::path::PathBuf,
     },
 
-    URL(String),
+    URL(Url),
 
     None,
 }
@@ -120,8 +123,10 @@ impl Source {
                 let mut buf_reader = std::io::BufReader::new(file);
                 T::read_from(&mut buf_reader)
             }
-            Source::URL(_) => {
-                todo!()
+            Source::URL(url) => {
+                let request = ehttp::Request::get(url);
+                let response = ehttp::fetch_blocking(&request);
+                handle_response_from_url(url, response)
             }
             Source::None => Err(SourceError::NoSource),
         }
@@ -165,10 +170,43 @@ impl Source {
 
                 Err(SourceError::InvalidPath(path.to_str().unwrap().to_string()))
             }
-            Source::URL(_) => {
-                todo!()
+            Source::URL(url) => {
+                let mut request = ehttp::Request::get(url);
+                let response = ehttp::fetch_async(request).await;
+                handle_response_from_url(url, response)
             }
             Source::None => Err(SourceError::NoSource),
         }
+    }
+}
+
+fn handle_response_from_url<T: Asset>(
+    url: &Url,
+    response: ehttp::Result<ehttp::Response>,
+) -> Result<T, SourceError> {
+    match response {
+        Ok(response) => {
+            if (200..300).contains(&response.status) {
+                let mut cursor = std::io::Cursor::new(response.bytes);
+                T::read_from(&mut cursor)
+            } else if response.status == 404 {
+                Err(SourceError::NotFound(url.to_string()))
+            } else {
+                Err(SourceError::Other {
+                    message: response.status_text,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    name: std::io::ErrorKind::Other,
+                    #[cfg(target_arch = "wasm32")]
+                    name: "Unsupported HTTP Status".to_string(),
+                })
+            }
+        }
+        Err(err) => Err(SourceError::Other {
+            message: err,
+            #[cfg(not(target_arch = "wasm32"))]
+            name: std::io::ErrorKind::Other,
+            #[cfg(target_arch = "wasm32")]
+            name: "Request failed".to_string(),
+        }),
     }
 }
