@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::hash::Hash;
+use std::sync::Arc;
 
 #[derive(Copy, Clone)]
 pub struct SortedHashKey<K, SK>
@@ -55,7 +56,7 @@ where
     K: Hash + Eq + Copy,
     SK: Ord + Eq + Copy,
 {
-    pub keys: SortedHashKey<K, SK>,
+    pub keys: Arc<SortedHashKey<K, SK>>,
     pub value: V,
 }
 
@@ -65,7 +66,7 @@ where
     SK: Ord + Eq + Copy,
 {
     map: FxHashMap<K, SortedHashEntry<K, SK, V>>,
-    sorted_set: BTreeSet<SortedHashKey<K, SK>>,
+    sorted_set: BTreeSet<Arc<SortedHashKey<K, SK>>>,
 }
 
 impl<K, SK, V> SortedHashMap<K, SK, V>
@@ -81,9 +82,12 @@ where
     }
 
     pub fn insert(&mut self, hash_key: K, sort_key: SK, value: V) {
-        let keys = SortedHashKey { hash_key, sort_key };
+        let keys = Arc::new(SortedHashKey { hash_key, sort_key });
 
-        let entry = SortedHashEntry { keys, value };
+        let entry = SortedHashEntry {
+            keys: Arc::clone(&keys),
+            value,
+        };
 
         if let Some(old_entry) = self.map.insert(hash_key, entry) {
             self.sorted_set.remove(&old_entry.keys);

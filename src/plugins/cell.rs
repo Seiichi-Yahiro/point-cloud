@@ -181,9 +181,15 @@ impl Default for MissingCells {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CellSortValue {
+    hierarchy: u32,
+    distance_to_camera: u32,
+}
+
 #[derive(Resource)]
 struct LoadingCells {
-    should_load: SortedHashMap<CellId, u32, ()>,
+    should_load: SortedHashMap<CellId, CellSortValue, ()>,
     loading: FxHashSet<CellId>,
 }
 
@@ -429,9 +435,12 @@ fn update_cells(
                 let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
                 let distance_to_camera = (cell_pos - transform.translation).length_squared() as u32;
 
-                loading_cells
-                    .should_load
-                    .insert(cell_id, distance_to_camera, ());
+                let sort_value = CellSortValue {
+                    hierarchy: cell_id.hierarchy,
+                    distance_to_camera,
+                };
+
+                loading_cells.should_load.insert(cell_id, sort_value, ());
             }
 
             new_visible_cells.push(visible_cells);
