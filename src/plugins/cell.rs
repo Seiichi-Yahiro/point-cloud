@@ -1,6 +1,5 @@
 use std::hash::{BuildHasherDefault, Hash};
 use std::io::Read;
-use std::ops::RangeInclusive;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -167,28 +166,7 @@ enum StreamState {
 
 #[derive(Debug, Default, Resource)]
 struct VisibleCells {
-    ranges: Vec<VisibleCellsRanges>,
-}
-
-#[derive(Debug, Clone)]
-struct VisibleCellsRanges {
-    x: RangeInclusive<i32>,
-    y: RangeInclusive<i32>,
-    z: RangeInclusive<i32>,
-}
-
-impl VisibleCellsRanges {
-    fn cartesian_product(&self) -> impl Iterator<Item = (i32, i32, i32)> {
-        self.x
-            .clone()
-            .cartesian_product(self.y.clone())
-            .cartesian_product(self.z.clone())
-            .map(|((x, y), z)| (x, y, z))
-    }
-
-    fn contains(&self, element: IVec3) -> bool {
-        self.x.contains(&element.x) && self.y.contains(&element.y) && self.z.contains(&element.z)
-    }
+    hierarchies: Vec<FxHashSet<IVec3>>,
 }
 
 #[derive(Default, Resource)]
@@ -230,7 +208,7 @@ fn cleanup_cells(
     mut missing_cells: ResMut<MissingCells>,
     mut loading_cells: ResMut<LoadingCells>,
 ) {
-    visible_cells.ranges.clear();
+    visible_cells.hierarchies.clear();
     loading_cells.should_load.clear();
     loading_cells.loading.clear();
     loaded_cells.0.clear();
@@ -301,9 +279,9 @@ fn receive_cell(
                 missing_cells.0.remove(id);
 
                 if visible_cells
-                    .ranges
+                    .hierarchies
                     .get(id.hierarchy as usize)
-                    .map(|ranges| ranges.contains(id.index))
+                    .map(|cell_indices| cell_indices.contains(&id.index))
                     .unwrap_or(false)
                 {
                     log::debug!("Received created cell {:?}", id);
@@ -407,23 +385,22 @@ fn update_cells(
             let min_cell_index = metadata.config.cell_index(frustum_aabb.min, cell_size);
             let max_cell_index = metadata.config.cell_index(frustum_aabb.max, cell_size);
 
-            let ranges = VisibleCellsRanges {
-                x: min_cell_index.x..=max_cell_index.x,
-                y: min_cell_index.y..=max_cell_index.y,
-                z: min_cell_index.z..=max_cell_index.z,
-            };
-
-            let visible_not_missing_cells = ranges
-                .cartesian_product()
-                .map(|(x, y, z)| IVec3::new(x, y, z))
-                .map(|cell_index| CellId {
-                    hierarchy,
-                    index: cell_index,
-                })
-                .filter(|cell_id| {
-                    let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
+            let visible_cells: FxHashSet<IVec3> = (min_cell_index.x..=max_cell_index.x)
+                .cartesian_product(min_cell_index.y..=max_cell_index.y)
+                .cartesian_product(min_cell_index.z..=max_cell_index.z)
+                .map(|((x, y), z)| IVec3::new(x, y, z))
+                .filter(|cell_index| {
+                    let cell_pos = metadata.config.cell_pos(*cell_index, cell_size);
                     let cell_aabb = Aabb::new(cell_pos - half_cell_size, cell_pos + half_cell_size);
                     !streaming_frustum.cull_aabb(cell_aabb)
+                })
+                .collect();
+
+            let visible_not_missing_cells = visible_cells
+                .iter()
+                .map(|cell_index| CellId {
+                    hierarchy,
+                    index: *cell_index,
                 })
                 .filter(|cell_id| missing_cells.0.get(cell_id).is_none());
 
@@ -441,7 +418,7 @@ fn update_cells(
                 }
             }
 
-            new_visible_cells.push(ranges);
+            new_visible_cells.push(visible_cells);
         }
 
         for (_, entity) in loaded_cells.0.drain() {
@@ -450,7 +427,7 @@ fn update_cells(
 
         loaded_cells.0 = new_loaded;
         loading_cells.should_load = new_should_load;
-        visible_cells.ranges = new_visible_cells;
+        visible_cells.hierarchies = new_visible_cells;
     }
 }
 
