@@ -1,41 +1,20 @@
-use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
-use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
+use std::fmt::Debug;
+use std::hash::{BuildHasher, BuildHasherDefault, Hash};
 use std::sync::Arc;
 
+use rustc_hash::{FxHashMap, FxHasher};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SortedHashKey<K, SK> {
-    pub hash_key: K,
     pub sort_key: SK,
+    pub hash_key: K,
 }
-
-impl<K, SK> Debug for SortedHashKey<K, SK>
-where
-    K: Debug,
-    SK: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SortedHashKey")
-            .field("hash_key", &self.hash_key)
-            .field("sort_key", &self.sort_key)
-            .finish()
-    }
-}
-
-impl<K, SK> PartialEq for SortedHashKey<K, SK>
-where
-    SK: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.sort_key.eq(&other.sort_key)
-    }
-}
-
-impl<K, SK> Eq for SortedHashKey<K, SK> where SK: Eq {}
 
 impl<K, SK> PartialOrd for SortedHashKey<K, SK>
 where
+    K: Eq + Hash,
     SK: PartialOrd + Ord,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -45,32 +24,30 @@ where
 
 impl<K, SK> Ord for SortedHashKey<K, SK>
 where
+    K: Eq + Hash,
     SK: Ord,
 {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.sort_key.cmp(&other.sort_key)
+        match self.sort_key.cmp(&other.sort_key) {
+            Ordering::Equal => {
+                let h = BuildHasherDefault::<FxHasher>::default();
+                let h1 = h.hash_one(&self.hash_key);
+                let h2 = h.hash_one(&other.hash_key);
+
+                h1.cmp(&h2)
+            }
+            cmp => cmp,
+        }
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct SortedHashEntry<K, SK, V> {
     pub keys: Arc<SortedHashKey<K, SK>>,
     pub value: V,
 }
 
-impl<K, SK, V> Debug for SortedHashEntry<K, SK, V>
-where
-    K: Debug,
-    SK: Debug,
-    V: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SortedHashEntry")
-            .field("keys", &self.keys)
-            .field("value", &self.value)
-            .finish()
-    }
-}
-
+#[derive(Debug)]
 pub struct SortedHashMap<K, SK, V> {
     map: FxHashMap<K, SortedHashEntry<K, SK, V>>,
     sorted_set: BTreeSet<Arc<SortedHashKey<K, SK>>>,
@@ -132,16 +109,141 @@ where
     }
 }
 
-impl<K, SK, V> Debug for SortedHashMap<K, SK, V>
-where
-    K: Debug,
-    SK: Debug,
-    V: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SortedHashMap")
-            .field("map", &self.map)
-            .field("sorted_set", &self.sorted_set)
-            .finish()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_same_hash_key_twice_overrides() {
+        let mut shm = SortedHashMap::<u32, u32, ()>::new();
+
+        shm.insert(0, 0, ());
+        shm.insert(0, 1, ());
+
+        assert_eq!(
+            shm.map.len(),
+            shm.sorted_set.len(),
+            "lengths don't match, hash: {}, sort: {}",
+            shm.map.len(),
+            shm.sorted_set.len()
+        );
+
+        assert_eq!(shm.len(), 1, "total length should be 1");
+    }
+
+    #[test]
+    fn can_hold_same_sort_key_twice() {
+        let mut shm = SortedHashMap::<u32, u32, ()>::new();
+
+        shm.insert(0, 0, ());
+        shm.insert(1, 0, ());
+
+        assert_eq!(
+            shm.map.len(),
+            shm.sorted_set.len(),
+            "lengths don't match, hash: {}, sort: {}",
+            shm.map.len(),
+            shm.sorted_set.len()
+        );
+
+        assert_eq!(shm.len(), 2, "total length should be 2");
+    }
+
+    #[test]
+    fn returns_sorted() {
+        let mut shm = SortedHashMap::<u32, u32, ()>::new();
+
+        shm.insert(0, 2, ());
+        shm.insert(1, 3, ());
+        shm.insert(2, 1, ());
+
+        let first = shm.pop_first();
+        let second = shm.pop_first();
+        let third = shm.pop_first();
+        let last = shm.pop_first();
+
+        let result = [first, second, third, last];
+        let expected = [
+            Some(SortedHashEntry {
+                keys: Arc::new(SortedHashKey {
+                    hash_key: 2,
+                    sort_key: 1,
+                }),
+                value: (),
+            }),
+            Some(SortedHashEntry {
+                keys: Arc::new(SortedHashKey {
+                    hash_key: 0,
+                    sort_key: 2,
+                }),
+                value: (),
+            }),
+            Some(SortedHashEntry {
+                keys: Arc::new(SortedHashKey {
+                    hash_key: 1,
+                    sort_key: 3,
+                }),
+                value: (),
+            }),
+            None,
+        ];
+
+        assert_eq!(result, expected);
+
+        assert_eq!(
+            shm.map.len(),
+            shm.sorted_set.len(),
+            "lengths don't match, hash: {}, sort: {}",
+            shm.map.len(),
+            shm.sorted_set.len()
+        );
+
+        assert_eq!(shm.len(), 0, "total length should be 0");
+    }
+
+    #[test]
+    fn remove_by_hash_key() {
+        let mut shm = SortedHashMap::<u32, u32, ()>::new();
+
+        shm.insert(0, 2, ());
+        shm.insert(1, 3, ());
+        shm.insert(2, 1, ());
+
+        shm.remove(&1);
+
+        let first = shm.pop_first();
+        let second = shm.pop_first();
+        let last = shm.pop_first();
+
+        let result = [first, second, last];
+        let expected = [
+            Some(SortedHashEntry {
+                keys: Arc::new(SortedHashKey {
+                    hash_key: 2,
+                    sort_key: 1,
+                }),
+                value: (),
+            }),
+            Some(SortedHashEntry {
+                keys: Arc::new(SortedHashKey {
+                    hash_key: 0,
+                    sort_key: 2,
+                }),
+                value: (),
+            }),
+            None,
+        ];
+
+        assert_eq!(result, expected);
+
+        assert_eq!(
+            shm.map.len(),
+            shm.sorted_set.len(),
+            "lengths don't match, hash: {}, sort: {}",
+            shm.map.len(),
+            shm.sorted_set.len()
+        );
+
+        assert_eq!(shm.len(), 0, "total length should be 0");
     }
 }
