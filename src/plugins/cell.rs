@@ -370,11 +370,11 @@ fn update_cells(
             continue;
         }
 
-        let mut new_loaded = FxHashMap::with_capacity(loaded_cells.0.capacity());
-        let mut new_should_load = SortedHashMap::<CellId, u32, ()>::new();
         let mut new_visible_cells = Vec::with_capacity(metadata.hierarchies as usize);
 
         for (hierarchy, streaming_frustum) in streaming_frustums.iter().enumerate() {
+            let old_visible_cells = visible_cells.hierarchies.get(hierarchy);
+
             let hierarchy = hierarchy as u32;
 
             let cell_size = metadata.config.cell_size(hierarchy);
@@ -396,37 +396,47 @@ fn update_cells(
                 })
                 .collect();
 
-            let visible_not_missing_cells = visible_cells
-                .iter()
+            let not_visible_anymore_cells = old_visible_cells
+                .map_or_else::<Box<dyn Iterator<Item = &IVec3>>, _, _>(
+                    || Box::new(std::iter::empty()),
+                    |old| Box::new(old.difference(&visible_cells)),
+                )
+                .map(|cell_index| CellId {
+                    hierarchy,
+                    index: *cell_index,
+                });
+
+            for cell_id in not_visible_anymore_cells {
+                if let Some(entity) = loaded_cells.0.remove(&cell_id) {
+                    commands.entity(entity).despawn();
+                } else {
+                    loading_cells.should_load.remove(&cell_id);
+                }
+            }
+
+            let completely_new_visible_cells = old_visible_cells
+                .map_or_else::<Box<dyn Iterator<Item = &IVec3>>, _, _>(
+                    || Box::new(visible_cells.iter()),
+                    |old| Box::new(visible_cells.difference(old)),
+                )
                 .map(|cell_index| CellId {
                     hierarchy,
                     index: *cell_index,
                 })
                 .filter(|cell_id| missing_cells.0.get(cell_id).is_none());
 
-            for cell_id in visible_not_missing_cells {
-                if let Some(entity) = loaded_cells.0.remove(&cell_id) {
-                    new_loaded.insert(cell_id, entity);
-                } else if loading_cells.should_load.remove(&cell_id).is_some()
-                    || !loading_cells.loading.contains(&cell_id)
-                {
-                    let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
-                    let distance_to_camera =
-                        (cell_pos - transform.translation).length_squared() as u32;
+            for cell_id in completely_new_visible_cells {
+                let cell_pos = metadata.config.cell_pos(cell_id.index, cell_size);
+                let distance_to_camera = (cell_pos - transform.translation).length_squared() as u32;
 
-                    new_should_load.insert(cell_id, distance_to_camera, ());
-                }
+                loading_cells
+                    .should_load
+                    .insert(cell_id, distance_to_camera, ());
             }
 
             new_visible_cells.push(visible_cells);
         }
 
-        for (_, entity) in loaded_cells.0.drain() {
-            commands.entity(entity).despawn();
-        }
-
-        loaded_cells.0 = new_loaded;
-        loading_cells.should_load = new_should_load;
         visible_cells.hierarchies = new_visible_cells;
     }
 }
