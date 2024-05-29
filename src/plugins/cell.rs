@@ -6,7 +6,7 @@ use bevy_ecs::prelude::*;
 use bounding_volume::Aabb;
 use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
-use egui::ahash::{HashMapExt, HashSetExt};
+use egui::ahash::HashSetExt;
 use glam::IVec3;
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};

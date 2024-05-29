@@ -1,40 +1,42 @@
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
+use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 
-#[derive(Copy, Clone)]
-pub struct SortedHashKey<K, SK>
-where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
-{
+pub struct SortedHashKey<K, SK> {
     pub hash_key: K,
     pub sort_key: SK,
 }
 
+impl<K, SK> Debug for SortedHashKey<K, SK>
+where
+    K: Debug,
+    SK: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SortedHashKey")
+            .field("hash_key", &self.hash_key)
+            .field("sort_key", &self.sort_key)
+            .finish()
+    }
+}
+
 impl<K, SK> PartialEq for SortedHashKey<K, SK>
 where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
+    SK: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.sort_key.eq(&other.sort_key)
     }
 }
 
-impl<K, SK> Eq for SortedHashKey<K, SK>
-where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
-{
-}
+impl<K, SK> Eq for SortedHashKey<K, SK> where SK: Eq {}
 
 impl<K, SK> PartialOrd for SortedHashKey<K, SK>
 where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
+    SK: PartialOrd + Ord,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -43,37 +45,38 @@ where
 
 impl<K, SK> Ord for SortedHashKey<K, SK>
 where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
+    SK: Ord,
 {
     fn cmp(&self, other: &Self) -> Ordering {
         self.sort_key.cmp(&other.sort_key)
     }
 }
 
-pub struct SortedHashEntry<K, SK, V>
-where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
-{
+pub struct SortedHashEntry<K, SK, V> {
     pub keys: Arc<SortedHashKey<K, SK>>,
     pub value: V,
 }
 
-pub struct SortedHashMap<K, SK, V>
+impl<K, SK, V> Debug for SortedHashEntry<K, SK, V>
 where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
+    K: Debug,
+    SK: Debug,
+    V: Debug,
 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SortedHashEntry")
+            .field("keys", &self.keys)
+            .field("value", &self.value)
+            .finish()
+    }
+}
+
+pub struct SortedHashMap<K, SK, V> {
     map: FxHashMap<K, SortedHashEntry<K, SK, V>>,
     sorted_set: BTreeSet<Arc<SortedHashKey<K, SK>>>,
 }
 
-impl<K, SK, V> SortedHashMap<K, SK, V>
-where
-    K: Hash + Eq + Copy,
-    SK: Ord + Eq + Copy,
-{
+impl<K, SK, V> SortedHashMap<K, SK, V> {
     pub fn new() -> Self {
         Self {
             map: FxHashMap::default(),
@@ -81,6 +84,21 @@ where
         }
     }
 
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.sorted_set.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
+impl<K, SK, V> SortedHashMap<K, SK, V>
+where
+    K: Hash + Eq + Copy,
+    SK: Ord,
+{
     pub fn insert(&mut self, hash_key: K, sort_key: SK, value: V) {
         let keys = Arc::new(SortedHashKey { hash_key, sort_key });
 
@@ -112,13 +130,18 @@ where
             None
         }
     }
+}
 
-    pub fn clear(&mut self) {
-        self.map.clear();
-        self.sorted_set.clear();
-    }
-
-    pub fn len(&self) -> usize {
-        self.map.len()
+impl<K, SK, V> Debug for SortedHashMap<K, SK, V>
+where
+    K: Debug,
+    SK: Debug,
+    V: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SortedHashMap")
+            .field("map", &self.map)
+            .field("sorted_set", &self.sorted_set)
+            .finish()
     }
 }
