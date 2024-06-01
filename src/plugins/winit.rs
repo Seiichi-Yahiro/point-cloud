@@ -42,11 +42,11 @@ impl Deref for WindowEvent {
 }
 
 pub struct WinitPlugin {
-    pub canvas_id: String,
+    pub canvas_id: Option<String>,
 }
 
 impl WinitPlugin {
-    pub fn new(canvas_id: String) -> Self {
+    pub fn new(canvas_id: Option<String>) -> Self {
         Self { canvas_id }
     }
 }
@@ -61,12 +61,14 @@ impl Plugin for WinitPlugin {
                 use wasm_bindgen::JsCast;
                 use winit::platform::web::WindowBuilderExtWebSys;
 
+                let canvas_id = self.canvas_id.as_ref().expect("No canvas id provided");
+
                 let canvas = web_sys::window()
                 .unwrap()
                 .document()
                 .unwrap()
-                .get_element_by_id(&self.canvas_id)
-                .expect(&format!("Couldn't find canvas with id: {}", self.canvas_id))
+                .get_element_by_id(canvas_id)
+                .expect(&format!("Couldn't find canvas with id: {}", canvas_id))
                 .dyn_into::<web_sys::HtmlCanvasElement>()
                 .unwrap();
 

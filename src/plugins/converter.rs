@@ -450,7 +450,7 @@ fn get_handles_for_loading_tasks(
                             .as_ref()
                             .map_or(Source::None, |dir| dir.join(&id.path()));
 
-                        let handle = cell_manager.insert(id, cell, source);
+                        let handle = cell_manager.insert(id, cell, source, true);
                         cell_cache.insert(id, handle.clone());
                         tasks.tasks_with_handle.push_back((cell_task, handle));
                     }
@@ -628,7 +628,12 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
         )>::new(world);
 
         let (mut next_metadata_state, mut metadata_manager) = params.get_mut(world);
-        let _ = metadata_manager.insert("Unknown".to_string(), Metadata::default(), Source::None);
+        let _ = metadata_manager.insert(
+            "Unknown".to_string(),
+            Metadata::default(),
+            Source::None,
+            true,
+        );
         next_metadata_state.set(MetadataState::Loading);
     }
 

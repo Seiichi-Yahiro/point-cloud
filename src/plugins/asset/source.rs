@@ -171,7 +171,7 @@ impl Source {
                 Err(SourceError::InvalidPath(path.to_str().unwrap().to_string()))
             }
             Source::URL(url) => {
-                let mut request = ehttp::Request::get(url);
+                let request = ehttp::Request::get(url);
                 let response = ehttp::fetch_async(request).await;
                 handle_response_from_url(url, response)
             }

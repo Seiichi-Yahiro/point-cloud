@@ -397,7 +397,13 @@ where
     }
 
     #[must_use]
-    pub fn insert(&mut self, id: T::Id, asset: T, source: Source) -> AssetHandle<T> {
+    pub fn insert(
+        &mut self,
+        id: T::Id,
+        asset: T,
+        source: Source,
+        create_event: bool,
+    ) -> AssetHandle<T> {
         self.store.insert(
             id.clone(),
             AssetEntry {
@@ -412,7 +418,9 @@ where
 
         let handle = AssetHandle::new(id, self.ref_count_channels.sender.clone());
 
-        self.just_created.push(handle.clone());
+        if create_event {
+            self.just_created.push(handle.clone());
+        }
 
         handle
     }

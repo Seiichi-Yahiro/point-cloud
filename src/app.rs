@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use cfg_if::cfg_if;
+use url::Url;
 
 use crate::plugins::camera::CameraPlugin;
 use crate::plugins::cell::CellPlugin;
@@ -13,14 +14,17 @@ use crate::plugins::thread_pool::ThreadPoolPlugin;
 use crate::plugins::wgpu::WGPUPlugin;
 use crate::plugins::winit::{Window, WinitPlugin};
 
-pub struct App;
+pub struct App {
+    pub canvas_id: Option<String>,
+    pub url: Option<Url>,
+}
 
 impl App {
-    pub async fn run() {
+    pub async fn run(self) {
         setup_logger();
 
         let mut app = bevy_app::App::new();
-        app.add_plugins(WinitPlugin::new("point-cloud-canvas".to_string()));
+        app.add_plugins(WinitPlugin::new(self.canvas_id));
 
         WGPUPlugin::build(
             Arc::clone(app.world.get_resource::<Window>().unwrap()),
@@ -31,7 +35,7 @@ impl App {
         app.add_plugins((InputPlugin, CameraPlugin, FPSPlugin))
             .add_plugins((
                 ThreadPoolPlugin,
-                MetadataPlugin,
+                MetadataPlugin { url: self.url },
                 CellPlugin,
                 #[cfg(not(target_arch = "wasm32"))]
                 crate::plugins::converter::ConverterPlugin,

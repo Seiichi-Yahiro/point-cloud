@@ -1,5 +1,11 @@
-use point_cloud_lib::run;
+use point_cloud_lib::App;
 
 fn main() {
-    pollster::block_on(run());
+    let future = App {
+        canvas_id: None,
+        url: None,
+    }
+    .run();
+
+    pollster::block_on(future);
 }

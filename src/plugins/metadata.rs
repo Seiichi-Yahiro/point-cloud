@@ -6,6 +6,7 @@ use glam::Vec3;
 use std::io::Read;
 use std::path::PathBuf;
 use thousands::Separable;
+use url::Url;
 
 use point_converter::metadata::Metadata;
 
@@ -63,7 +64,9 @@ impl Asset for Metadata {
     }
 }
 
-pub struct MetadataPlugin;
+pub struct MetadataPlugin {
+    pub url: Option<Url>,
+}
 
 impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
@@ -79,6 +82,7 @@ impl Plugin for MetadataPlugin {
 
         app.add_plugins(AssetPlugin::<Metadata>::default())
             .insert_state(MetadataState::NotLoaded)
+            .insert_resource(DefaultURL(self.url.clone()))
             .add_event::<UpdateMetadataEvent>()
             .add_event_set::<UpdatedMetadataEventSet>()
             .add_systems(PreStartup, setup)
@@ -101,6 +105,9 @@ impl Plugin for MetadataPlugin {
             );
     }
 }
+
+#[derive(Debug, Resource)]
+struct DefaultURL(Option<Url>);
 
 #[derive(Debug, Copy, Clone, Event)]
 pub struct UpdatedMetadataHierarchiesEvent;
@@ -157,10 +164,30 @@ fn setup(
     mut commands: Commands,
     mut metadata_manager: AssetManagerResMut<Metadata>,
     mut next_metadata_state: ResMut<NextState<MetadataState>>,
+    default_url: Res<DefaultURL>,
 ) {
-    let handle = metadata_manager.insert("Unknown".to_string(), Metadata::default(), Source::None);
+    let handle = metadata_manager.insert(
+        "Unknown".to_string(),
+        Metadata::default(),
+        Source::None,
+        false,
+    );
     commands.insert_resource(LoadedMetadata { active: handle });
-    next_metadata_state.set(MetadataState::Loaded);
+
+    if let Some(url) = &default_url.0 {
+        metadata_manager
+            .load_sender()
+            .send(LoadAssetMsg {
+                id: "Unknown URL".to_string(),
+                source: Source::URL(url.clone()),
+                reply_sender: None,
+            })
+            .unwrap();
+
+        next_metadata_state.set(MetadataState::Loading);
+    } else {
+        next_metadata_state.set(MetadataState::Loaded);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
@@ -253,9 +280,9 @@ fn receive_metadata(
                     metadata.number_of_points
                 );
 
-                next_metadata_state.set(MetadataState::Loaded);
-
                 loaded_metadata.set_active(handle.clone());
+
+                next_metadata_state.set(MetadataState::Loaded);
             }
             AssetEvent::Changed { .. } => {}
             AssetEvent::Loaded(AssetLoadedEvent::Error { id, error }) => {
