@@ -4,9 +4,10 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
-use glam::{IVec3, UVec3, Vec3};
-use rustc_hash::{FxHashMap, FxHashSet};
+use glam::{IVec3, Vec3};
+use rustc_hash::FxHashMap;
 
+use crate::hex::{HexWorldIndex, OffsetIndex};
 use crate::metadata::{Metadata, MetadataConfig};
 use crate::point::Point;
 use crate::Endianess;
@@ -33,8 +34,7 @@ impl CellId {
 #[derive(Debug)]
 pub struct Cell {
     header: Header,
-    points: Vec<Point>,
-    points_grid: FxHashSet<u32>,
+    points_grid: FxHashMap<OffsetIndex, Point>,
     pub(crate) overflow: FxHashMap<IVec3, Option<Vec<Point>>>,
 }
 
@@ -44,8 +44,7 @@ impl Cell {
     pub fn new(id: CellId, sub_grid_dimension: u32, size: f32, pos: Vec3, capacity: usize) -> Self {
         Self {
             header: Header::new(id, sub_grid_dimension, size, pos),
-            points: Vec::with_capacity(capacity),
-            points_grid: FxHashSet::with_capacity_and_hasher(
+            points_grid: FxHashMap::with_capacity_and_hasher(
                 capacity,
                 BuildHasherDefault::default(),
             ),
@@ -57,8 +56,8 @@ impl Cell {
         &self.header
     }
 
-    pub fn points(&self) -> &[Point] {
-        &self.points
+    pub fn points(&self) -> impl Iterator<Item = &Point> {
+        self.points_grid.values()
     }
 
     pub fn overflow_points(&self) -> impl Iterator<Item = &Point> {
@@ -69,30 +68,41 @@ impl Cell {
     }
 
     pub fn all_points(&self) -> impl Iterator<Item = &Point> {
-        self.points.iter().chain(self.overflow_points())
+        self.points().chain(self.overflow_points())
     }
 
-    pub fn add_point(&mut self, point: Point) -> bool {
-        let sub_grid_index = self
-            .header
-            .sub_grid_index_for_point(point, self.header.sub_grid_dimension);
+    pub fn add_point(&mut self, point: Point) -> Option<Point> {
+        let index = self.header.sub_grid_index_for_point(point);
 
-        if self.points_grid.insert(sub_grid_index) {
-            self.points.push(point);
-            self.header.total_number_of_points += 1;
-            self.header.number_of_points += 1;
+        match self.points_grid.entry(index) {
+            Entry::Occupied(mut entry) => {
+                let sub_cell_size = self.header.size / self.header.sub_grid_dimension as f32;
+                let pos = index.to_world(sub_cell_size / 2.0);
 
-            return true;
+                let old_distance = pos.distance_squared(entry.get().pos);
+                let new_distance = pos.distance_squared(point.pos);
+
+                if new_distance < old_distance {
+                    let old_point = entry.insert(point);
+                    Some(old_point)
+                } else {
+                    Some(point)
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(point);
+                self.header.total_number_of_points += 1;
+                self.header.number_of_points += 1;
+                None
+            }
         }
-
-        false
     }
 
     pub fn add_points(&mut self, points: Vec<Point>) -> Vec<Point> {
         let mut overflow_points = Vec::with_capacity(points.capacity());
 
         for point in points {
-            if !self.add_point(point) {
+            if let Some(point) = self.add_point(point) {
                 overflow_points.push(point);
             }
         }
@@ -150,7 +160,7 @@ impl Cell {
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
         self.header.write_to(writer)?;
 
-        for point in &self.points {
+        for point in self.points_grid.values() {
             point.write_to(writer)?;
         }
 
@@ -178,9 +188,7 @@ impl Cell {
     pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
         let header = Header::read_from(reader)?;
 
-        let mut points = Vec::with_capacity(header.number_of_points as usize);
-
-        let mut points_grid = FxHashSet::with_capacity_and_hasher(
+        let mut points_grid = FxHashMap::with_capacity_and_hasher(
             header.number_of_points as usize,
             BuildHasherDefault::default(),
         );
@@ -188,10 +196,9 @@ impl Cell {
         for _ in 0..header.number_of_points {
             let point = Point::read_from(reader)?;
 
-            let sub_grid_index = header.sub_grid_index_for_point(point, header.sub_grid_dimension);
+            let sub_grid_index = header.sub_grid_index_for_point(point);
 
-            points_grid.insert(sub_grid_index);
-            points.push(point);
+            points_grid.insert(sub_grid_index, point);
         }
 
         let overflow_len = reader.read_u8()? as usize;
@@ -224,7 +231,6 @@ impl Cell {
 
         Ok(Self {
             header,
-            points,
             points_grid,
             overflow,
         })
@@ -275,17 +281,11 @@ impl Header {
         }
     }
 
-    fn sub_grid_index_for_point(&self, point: Point, sub_grid_dimension: u32) -> u32 {
-        let sub_cell_size = self.size / sub_grid_dimension as f32;
-        let offset = point.pos - self.pos + self.size / 2.0;
+    fn sub_grid_index_for_point(&self, point: Point) -> OffsetIndex {
+        let sub_cell_size = self.size / self.sub_grid_dimension as f32;
+        let offset = point.pos - self.pos;
 
-        let sub_cell_id = (offset / sub_cell_size)
-            .as_uvec3()
-            .min(UVec3::splat(sub_grid_dimension - 1)); // TODO why is min needed? precision problem? or bug?
-
-        sub_cell_id.x
-            + sub_cell_id.y * sub_grid_dimension
-            + sub_cell_id.z * sub_grid_dimension.pow(2)
+        OffsetIndex::from_world(offset, sub_cell_size / 2.0)
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {

@@ -80,7 +80,7 @@ pub struct MetadataConfig {
 impl Default for MetadataConfig {
     fn default() -> Self {
         Self {
-            sub_grid_dimension: 128,
+            sub_grid_dimension: 96,
             cell_point_overflow_limit: 5_000, // smaller values give better quality but more small files
             max_cell_size: 1000.0,
         }
@@ -101,6 +101,8 @@ impl MetadataConfig {
     }
 
     pub fn cell_spacing(&self, cell_size: f32) -> f32 {
-        (cell_size / self.sub_grid_dimension as f32) * 0.5 * 3.0f32.sqrt()
+        let cell_size = cell_size / self.sub_grid_dimension as f32;
+        let cell_radius = cell_size * 0.5;
+        cell_radius.hypot(cell_radius * 0.5) * 1.05
     }
 }

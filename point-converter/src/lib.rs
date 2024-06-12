@@ -4,6 +4,7 @@ use crate::converter::BatchedPointReader;
 
 pub mod cell;
 pub mod converter;
+pub mod hex;
 pub mod metadata;
 pub mod point;
 
