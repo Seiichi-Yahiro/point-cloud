@@ -9,8 +9,129 @@ use crate::plugins::camera::Camera;
 use crate::plugins::cell::frustums::StreamingFrustums;
 use crate::plugins::cell::CellHeader;
 use crate::plugins::metadata::ActiveMetadata;
+use crate::plugins::render::point::Point;
 use crate::plugins::wgpu::{Device, Queue};
 use crate::transform::Transform;
+
+#[derive(Resource)]
+pub struct PointVertexBuffersBindGroupLayout(pub wgpu::BindGroupLayout);
+
+impl PointVertexBuffersBindGroupLayout {
+    fn new(device: &wgpu::Device) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("point-vertex-buffers-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0, // point-input-vertex-buffer
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1, // point-output-vertex-buffer
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2, // point-indirect-buffer
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        Self(layout)
+    }
+}
+
+#[derive(Component)]
+pub struct PointVertexBuffers {
+    input_length: u32,
+    pub input: wgpu::Buffer,
+    pub output: wgpu::Buffer,
+    pub indirect: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+}
+
+impl PointVertexBuffers {
+    pub fn input_length(&self) -> u32 {
+        self.input_length
+    }
+
+    pub(super) fn new(
+        device: &wgpu::Device,
+        layout: &PointVertexBuffersBindGroupLayout,
+        points: &[Point],
+    ) -> Self {
+        let input_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("point-input-vertex-buffer"),
+            contents: bytemuck::cast_slice(points),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let output_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("point-output-vertex-buffer"),
+            size: std::mem::size_of_val(points) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
+
+        let indirect_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("point-indirect-buffer"),
+            contents: wgpu::util::DrawIndirectArgs {
+                vertex_count: 4,
+                instance_count: 0,
+                first_vertex: 0,
+                first_instance: 0,
+            }
+            .as_bytes(),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("point-vertex-buffers-bind-group"),
+            layout: &layout.0,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input_vertex_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_vertex_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: indirect_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        Self {
+            input_length: points.len() as u32,
+            input: input_vertex_buffer,
+            output: output_vertex_buffer,
+            indirect: indirect_buffer,
+            bind_group,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -337,6 +458,8 @@ pub(super) fn update_cells_bind_group(
 pub(super) fn setup(world: &mut World) {
     let device = world.get_resource::<Device>().unwrap();
 
+    let point_vertex_buffers_bind_group_layout = PointVertexBuffersBindGroupLayout::new(device);
+
     let cell_bind_group_layout = CellBindGroupLayout::new(device);
 
     let cells_bind_group_layout = CellsBindGroupLayout::new(device);
@@ -350,6 +473,8 @@ pub(super) fn setup(world: &mut World) {
         &frustums_buffer,
         &frustums_settings,
     );
+
+    world.insert_resource(point_vertex_buffers_bind_group_layout);
 
     world.insert_resource(cell_bind_group_layout);
 

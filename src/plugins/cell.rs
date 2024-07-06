@@ -3,7 +3,6 @@ use std::io::Read;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use bounding_volume::Aabb;
 use bytesize::ByteSize;
 use caches::{Cache, LRUCache};
 use egui::ahash::HashSetExt;
@@ -12,6 +11,7 @@ use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use thousands::Separable;
 
+use bounding_volume::Aabb;
 use point_converter::cell::{Cell, CellId};
 
 use crate::plugins::asset::source::{Source, SourceError};
@@ -21,12 +21,14 @@ use crate::plugins::asset::{
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::cell::frustums::StreamingFrustumsScale;
-use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};
+use crate::plugins::cell::shader::{
+    CellBindGroupData, CellBindGroupLayout, FrustumsSettings, PointVertexBuffers,
+    PointVertexBuffersBindGroupLayout,
+};
 use crate::plugins::metadata::{
     ActiveMetadata, MetadataState, UpdatedMetadataBoundingBoxEvent, UpdatedMetadataHierarchiesEvent,
 };
 use crate::plugins::render::point::Point;
-use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::Device;
 use crate::sorted_hash::SortedHashMap;
 use crate::transform::Transform;
@@ -232,8 +234,8 @@ pub struct CellHeader(pub point_converter::cell::Header);
 struct CellBundle {
     cell_handle: AssetHandle<Cell>,
     header: CellHeader,
-    vertex_buffer: VertexBuffer<Point>,
-    bind_group_data: CellBindGroupData,
+    vertex_buffers: PointVertexBuffers,
+    cell_bind_group_data: CellBindGroupData,
     visibility: Visibility,
 }
 
@@ -242,6 +244,7 @@ impl CellBundle {
         cell_handle: AssetHandle<Cell>,
         cell: &Cell,
         device: &wgpu::Device,
+        point_vertex_buffers_bind_group_layout: &PointVertexBuffersBindGroupLayout,
         cell_bind_group_layout: &CellBindGroupLayout,
     ) -> Self {
         let header = cell.header().clone();
@@ -254,14 +257,17 @@ impl CellBundle {
             })
             .collect_vec();
 
-        let vertex_buffer = VertexBuffer::new(device, &points);
-        let bind_group_data = CellBindGroupData::new(device, cell_bind_group_layout, header.id);
+        let vertex_buffers =
+            PointVertexBuffers::new(device, point_vertex_buffers_bind_group_layout, &points);
+
+        let cell_bind_group_data =
+            CellBindGroupData::new(device, cell_bind_group_layout, header.id);
 
         Self {
             cell_handle,
             header: CellHeader(header),
-            vertex_buffer,
-            bind_group_data,
+            vertex_buffers,
+            cell_bind_group_data,
             visibility: Visibility::new(true),
         }
     }
@@ -272,6 +278,7 @@ fn receive_cell(
     cell_manager: AssetManagerRes<Cell>,
     mut assets_events: EventReader<AssetEvent<Cell>>,
     device: Res<Device>,
+    point_vertex_buffers_bind_group_layout: Res<PointVertexBuffersBindGroupLayout>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
     visible_cells: Res<VisibleCells>,
     mut loaded_cells: ResMut<LoadedCells>,
@@ -295,8 +302,13 @@ fn receive_cell(
 
                     // TODO delay reading of cell
                     let cell = cell_manager.get_asset(handle);
-                    let cell_bundle =
-                        CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
+                    let cell_bundle = CellBundle::new(
+                        handle.clone(),
+                        cell,
+                        &device,
+                        &point_vertex_buffers_bind_group_layout,
+                        &cell_bind_group_layout,
+                    );
                     let entity = commands.spawn(cell_bundle).id();
 
                     loaded_cells.0.insert(*id, entity);
@@ -315,8 +327,13 @@ fn receive_cell(
                         })
                         .collect_vec();
 
-                    let vertex_buffer = VertexBuffer::new(&device, &points);
-                    commands.entity(*entity).insert(vertex_buffer);
+                    let vertex_buffers = PointVertexBuffers::new(
+                        &device,
+                        &point_vertex_buffers_bind_group_layout,
+                        &points,
+                    );
+
+                    commands.entity(*entity).insert(vertex_buffers);
                 }
             }
             AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
@@ -331,8 +348,14 @@ fn receive_cell(
 
                 // TODO delay reading of cell
                 let cell = cell_manager.get_asset(handle);
-                let cell_bundle =
-                    CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
+                let cell_bundle = CellBundle::new(
+                    handle.clone(),
+                    cell,
+                    &device,
+                    &point_vertex_buffers_bind_group_layout,
+                    &cell_bind_group_layout,
+                );
+
                 let entity = commands.spawn(cell_bundle).id();
 
                 loaded_cells.0.insert(*id, entity);

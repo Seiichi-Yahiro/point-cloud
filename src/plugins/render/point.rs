@@ -5,9 +5,9 @@ use glam::Vec3;
 use crate::plugins::camera::{Camera, ViewBindGroupLayout, Visibility};
 use crate::plugins::cell::shader::{
     CellBindGroupData, CellBindGroupLayout, CellsBindGroup, CellsBindGroupLayout,
+    PointVertexBuffers, PointVertexBuffersBindGroupLayout,
 };
 use crate::plugins::metadata::shader::MetadataBindGroupData;
-use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::{
     CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
 };
@@ -37,7 +37,7 @@ pub struct PointRenderPlugin;
 
 impl Plugin for PointRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
+        app.add_systems(Startup, (create_render_pipeline, create_compute_pipeline))
             .add_systems(Render, draw.in_set(RenderPassSet));
 
         app.world
@@ -48,11 +48,43 @@ impl Plugin for PointRenderPlugin {
 }
 
 #[derive(Resource)]
+struct ComputeResources {
+    pipeline: wgpu::ComputePipeline,
+}
+
+fn create_compute_pipeline(
+    mut commands: Commands,
+    device: Res<Device>,
+    view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
+    point_vertex_buffers_bind_group_layout: Res<PointVertexBuffersBindGroupLayout>,
+) {
+    let compute_shader = device.create_shader_module(wgpu::include_wgsl!("point/cull.wgsl"));
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("point-frustum-cull-pipeline-layout"),
+        bind_group_layouts: &[
+            &view_projection_bind_group_layout,
+            &point_vertex_buffers_bind_group_layout.0,
+        ],
+        push_constant_ranges: &[],
+    });
+
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("point-frustum-cull-pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &compute_shader,
+        entry_point: "main",
+    });
+
+    commands.insert_resource(ComputeResources { pipeline });
+}
+
+#[derive(Resource)]
 struct RenderResources {
     pipeline: wgpu::RenderPipeline,
 }
 
-fn setup(
+fn create_render_pipeline(
     mut commands: Commands,
     device: Res<Device>,
     config: Res<SurfaceConfig>,
@@ -61,7 +93,7 @@ fn setup(
     cell_bind_group_layout: Res<CellBindGroupLayout>,
     cells_bind_group_layout: Res<CellsBindGroupLayout>,
 ) {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("point.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("point/point.wgsl"));
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("point-renderer-pipeline-layout"),
@@ -121,16 +153,56 @@ fn setup(
 fn draw(
     mut global_render_resources: GlobalRenderResources,
     local_render_resources: Res<RenderResources>,
+    compute_resources: Res<ComputeResources>,
     camera_query: Query<&Camera>,
-    vertex_buffers: Query<(&VertexBuffer<Point>, &CellBindGroupData, &Visibility)>,
+    buffers: Query<(&PointVertexBuffers, &CellBindGroupData, &Visibility)>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
     cells_bind_group_data: Res<CellsBindGroup>,
 ) {
     global_render_resources
         .encoders
         .encode::<PointRenderPlugin>(|encoder| {
+            for (vertex_buffers, _cell_bind_group_data, visibility) in &buffers {
+                if !visibility.visible {
+                    continue;
+                }
+
+                encoder.clear_buffer(
+                    &vertex_buffers.indirect,
+                    std::mem::size_of::<u32>() as wgpu::BufferAddress,
+                    Some(std::mem::size_of::<u32>() as wgpu::BufferAddress),
+                );
+            }
+
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("point-compute-pass"),
+                timestamp_writes: None,
+            });
+
+            compute_pass.set_pipeline(&compute_resources.pipeline);
+
+            for camera in camera_query.iter() {
+                compute_pass.set_bind_group(0, &camera.bind_group, &[]);
+
+                for (vertex_buffers, _cell_bind_group_data, visibility) in &buffers {
+                    if !visibility.visible {
+                        continue;
+                    }
+
+                    compute_pass.set_bind_group(1, &vertex_buffers.bind_group, &[]);
+
+                    compute_pass.dispatch_workgroups(
+                        vertex_buffers.input_length().div_ceil(128),
+                        1,
+                        1,
+                    );
+                }
+            }
+
+            drop(compute_pass);
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
+                label: Some("point-render-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &global_render_resources.render_view.view,
                     resolve_target: None,
@@ -157,15 +229,17 @@ fn draw(
                 render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
                 render_pass.set_bind_group(3, &cells_bind_group_data.0, &[]);
 
-                for (vertex_buffer, cell_bind_group_data, visibility) in vertex_buffers.iter() {
+                for (vertex_buffers, cell_bind_group_data, visibility) in &buffers {
                     if !visibility.visible {
                         continue;
-                    };
+                    }
 
                     render_pass.set_bind_group(2, &cell_bind_group_data.group, &[]);
-                    render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
-                    render_pass.draw(0..4, 0..vertex_buffer.len());
+                    render_pass.set_vertex_buffer(0, vertex_buffers.output.slice(..));
+                    render_pass.draw_indirect(&vertex_buffers.indirect, 0);
                 }
             }
+
+            drop(render_pass);
         });
 }
