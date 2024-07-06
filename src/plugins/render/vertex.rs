@@ -13,7 +13,7 @@ impl<T: bytemuck::NoUninit> VertexBuffer<T> {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vertex-buffer"),
             contents: bytemuck::cast_slice(vertices),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::VERTEX,
         });
 
         Self {

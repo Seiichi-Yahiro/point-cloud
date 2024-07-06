@@ -21,10 +21,7 @@ use crate::plugins::asset::{
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::cell::frustums::StreamingFrustumsScale;
-use crate::plugins::cell::shader::{
-    CellBindGroupData, CellBindGroupLayout, FrustumsSettings, PointVertexBuffers,
-    PointVertexBuffersBindGroupLayout,
-};
+use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};
 use crate::plugins::metadata::{
     ActiveMetadata, MetadataState, UpdatedMetadataBoundingBoxEvent, UpdatedMetadataHierarchiesEvent,
 };
@@ -234,7 +231,6 @@ pub struct CellHeader(pub point_converter::cell::Header);
 struct CellBundle {
     cell_handle: AssetHandle<Cell>,
     header: CellHeader,
-    vertex_buffers: PointVertexBuffers,
     cell_bind_group_data: CellBindGroupData,
     visibility: Visibility,
 }
@@ -244,7 +240,6 @@ impl CellBundle {
         cell_handle: AssetHandle<Cell>,
         cell: &Cell,
         device: &wgpu::Device,
-        point_vertex_buffers_bind_group_layout: &PointVertexBuffersBindGroupLayout,
         cell_bind_group_layout: &CellBindGroupLayout,
     ) -> Self {
         let header = cell.header().clone();
@@ -257,16 +252,12 @@ impl CellBundle {
             })
             .collect_vec();
 
-        let vertex_buffers =
-            PointVertexBuffers::new(device, point_vertex_buffers_bind_group_layout, &points);
-
         let cell_bind_group_data =
-            CellBindGroupData::new(device, cell_bind_group_layout, header.id);
+            CellBindGroupData::new(device, cell_bind_group_layout, &points, header.id);
 
         Self {
             cell_handle,
             header: CellHeader(header),
-            vertex_buffers,
             cell_bind_group_data,
             visibility: Visibility::new(true),
         }
@@ -278,7 +269,6 @@ fn receive_cell(
     cell_manager: AssetManagerRes<Cell>,
     mut assets_events: EventReader<AssetEvent<Cell>>,
     device: Res<Device>,
-    point_vertex_buffers_bind_group_layout: Res<PointVertexBuffersBindGroupLayout>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
     visible_cells: Res<VisibleCells>,
     mut loaded_cells: ResMut<LoadedCells>,
@@ -302,13 +292,8 @@ fn receive_cell(
 
                     // TODO delay reading of cell
                     let cell = cell_manager.get_asset(handle);
-                    let cell_bundle = CellBundle::new(
-                        handle.clone(),
-                        cell,
-                        &device,
-                        &point_vertex_buffers_bind_group_layout,
-                        &cell_bind_group_layout,
-                    );
+                    let cell_bundle =
+                        CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
                     let entity = commands.spawn(cell_bundle).id();
 
                     loaded_cells.0.insert(*id, entity);
@@ -327,13 +312,14 @@ fn receive_cell(
                         })
                         .collect_vec();
 
-                    let vertex_buffers = PointVertexBuffers::new(
+                    let cell_bind_group_data = CellBindGroupData::new(
                         &device,
-                        &point_vertex_buffers_bind_group_layout,
+                        &cell_bind_group_layout,
                         &points,
+                        *handle.id(),
                     );
 
-                    commands.entity(*entity).insert(vertex_buffers);
+                    commands.entity(*entity).insert(cell_bind_group_data);
                 }
             }
             AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
@@ -348,13 +334,8 @@ fn receive_cell(
 
                 // TODO delay reading of cell
                 let cell = cell_manager.get_asset(handle);
-                let cell_bundle = CellBundle::new(
-                    handle.clone(),
-                    cell,
-                    &device,
-                    &point_vertex_buffers_bind_group_layout,
-                    &cell_bind_group_layout,
-                );
+                let cell_bundle =
+                    CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
 
                 let entity = commands.spawn(cell_bundle).id();
 

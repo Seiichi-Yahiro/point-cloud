@@ -5,7 +5,6 @@ use glam::Vec3;
 use crate::plugins::camera::{Camera, ViewBindGroupLayout, Visibility};
 use crate::plugins::cell::shader::{
     CellBindGroupData, CellBindGroupLayout, CellsBindGroup, CellsBindGroupLayout,
-    PointVertexBuffers, PointVertexBuffersBindGroupLayout,
 };
 use crate::plugins::metadata::shader::MetadataBindGroupData;
 use crate::plugins::wgpu::{
@@ -23,7 +22,7 @@ pub struct Point {
 impl Point {
     pub fn instance_desc() -> wgpu::VertexBufferLayout<'static> {
         const ATTRIBS: [wgpu::VertexAttribute; 2] =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Unorm8x4];
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32];
 
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
@@ -56,21 +55,26 @@ fn create_compute_pipeline(
     mut commands: Commands,
     device: Res<Device>,
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
-    point_vertex_buffers_bind_group_layout: Res<PointVertexBuffersBindGroupLayout>,
+    metadata_bind_group_data: Res<MetadataBindGroupData>,
+    cell_bind_group_layout: Res<CellBindGroupLayout>,
+    cells_bind_group_layout: Res<CellsBindGroupLayout>,
 ) {
-    let compute_shader = device.create_shader_module(wgpu::include_wgsl!("point/cull.wgsl"));
+    let compute_shader =
+        device.create_shader_module(wgpu::include_wgsl!("point/point_compute.wgsl"));
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("point-frustum-cull-pipeline-layout"),
+        label: Some("point-compute-pipeline-layout"),
         bind_group_layouts: &[
             &view_projection_bind_group_layout,
-            &point_vertex_buffers_bind_group_layout.0,
+            &metadata_bind_group_data.layout,
+            &cell_bind_group_layout.0,
+            &cells_bind_group_layout.0,
         ],
         push_constant_ranges: &[],
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("point-frustum-cull-pipeline"),
+        label: Some("point-compute-pipeline"),
         layout: Some(&pipeline_layout),
         module: &compute_shader,
         entry_point: "main",
@@ -90,18 +94,14 @@ fn create_render_pipeline(
     config: Res<SurfaceConfig>,
     view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
-    cell_bind_group_layout: Res<CellBindGroupLayout>,
-    cells_bind_group_layout: Res<CellsBindGroupLayout>,
 ) {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("point/point.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("point/point_render.wgsl"));
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("point-renderer-pipeline-layout"),
         bind_group_layouts: &[
             &view_projection_bind_group_layout,
             &metadata_bind_group_data.layout,
-            &cell_bind_group_layout.0,
-            &cells_bind_group_layout.0,
         ],
         push_constant_ranges: &[],
     });
@@ -155,20 +155,20 @@ fn draw(
     local_render_resources: Res<RenderResources>,
     compute_resources: Res<ComputeResources>,
     camera_query: Query<&Camera>,
-    buffers: Query<(&PointVertexBuffers, &CellBindGroupData, &Visibility)>,
+    buffers: Query<(&CellBindGroupData, &Visibility)>,
     metadata_bind_group_data: Res<MetadataBindGroupData>,
     cells_bind_group_data: Res<CellsBindGroup>,
 ) {
     global_render_resources
         .encoders
         .encode::<PointRenderPlugin>(|encoder| {
-            for (vertex_buffers, _cell_bind_group_data, visibility) in &buffers {
+            for (cell_bind_group_data, visibility) in &buffers {
                 if !visibility.visible {
                     continue;
                 }
 
                 encoder.clear_buffer(
-                    &vertex_buffers.indirect,
+                    &cell_bind_group_data.indirect_points,
                     std::mem::size_of::<u32>() as wgpu::BufferAddress,
                     Some(std::mem::size_of::<u32>() as wgpu::BufferAddress),
                 );
@@ -183,16 +183,18 @@ fn draw(
 
             for camera in camera_query.iter() {
                 compute_pass.set_bind_group(0, &camera.bind_group, &[]);
+                compute_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
+                compute_pass.set_bind_group(3, &cells_bind_group_data.0, &[]);
 
-                for (vertex_buffers, _cell_bind_group_data, visibility) in &buffers {
+                for (cell_bind_group_data, visibility) in &buffers {
                     if !visibility.visible {
                         continue;
                     }
 
-                    compute_pass.set_bind_group(1, &vertex_buffers.bind_group, &[]);
+                    compute_pass.set_bind_group(2, &cell_bind_group_data.bind_group, &[]);
 
                     compute_pass.dispatch_workgroups(
-                        vertex_buffers.input_length().div_ceil(128),
+                        cell_bind_group_data.input_length().div_ceil(128),
                         1,
                         1,
                     );
@@ -227,16 +229,14 @@ fn draw(
                 render_pass.set_pipeline(&local_render_resources.pipeline);
                 render_pass.set_bind_group(0, &camera.bind_group, &[]);
                 render_pass.set_bind_group(1, &metadata_bind_group_data.group, &[]);
-                render_pass.set_bind_group(3, &cells_bind_group_data.0, &[]);
 
-                for (vertex_buffers, cell_bind_group_data, visibility) in &buffers {
+                for (cell_bind_group_data, visibility) in &buffers {
                     if !visibility.visible {
                         continue;
                     }
 
-                    render_pass.set_bind_group(2, &cell_bind_group_data.group, &[]);
-                    render_pass.set_vertex_buffer(0, vertex_buffers.output.slice(..));
-                    render_pass.draw_indirect(&vertex_buffers.indirect, 0);
+                    render_pass.set_vertex_buffer(0, cell_bind_group_data.output_points.slice(..));
+                    render_pass.draw_indirect(&cell_bind_group_data.indirect_points, 0);
                 }
             }
 
