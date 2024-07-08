@@ -154,7 +154,7 @@ fn binary_search(target_cell: Cell) -> bool {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let in_index = global_id.x;
    
-    if in_index > arrayLength(&in) {
+    if in_index >= arrayLength(&in) {
         return;
     }
 
