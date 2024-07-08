@@ -150,6 +150,19 @@ fn binary_search(target_cell: Cell) -> bool {
     return false;
 }
 
+fn unpack4x8(packed: u32) -> vec4<u32> {
+    return vec4<u32>(
+        (packed >> 0) & 0xFF,
+        (packed >> 8) & 0xFF,
+        (packed >> 16) & 0xFF,
+        (packed >> 24) & 0xFF
+    );
+}
+
+fn pack4x8(v: vec4<u32>) -> u32 {
+    return (v.w << 24) | (v.z << 16) | (v.y << 8) | v.x;
+}
+
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let in_index = global_id.x;
@@ -165,10 +178,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if all(abs(ndc.xy) <= vec2(1.0)) && abs(ndc.z - 0.5) <= 0.5 {
         let hierarchy = get_hierarchy(input.position);
-        let unpackedColor = unpack4x8unorm(input.color);
+        let unpackedColor = unpack4x8(input.color);
 
         var output = input;
-        output.color = pack4x8unorm(vec4(unpackedColor.xyz, f32(hierarchy) / 255.0));
+        output.color = pack4x8(vec4(unpackedColor.xyz, hierarchy));
 
         let old_index = atomicAdd(&indirect_buffer.instance_count, 1u);
         out[old_index] = output;
