@@ -21,11 +21,12 @@ use crate::plugins::asset::{
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::camera::{Camera, UpdateFrustum, Visibility};
 use crate::plugins::cell::frustums::StreamingFrustumsScale;
-use crate::plugins::cell::shader::{CellBindGroupData, CellBindGroupLayout, FrustumsSettings};
+use crate::plugins::cell::shader::{CellBufferBundle, FrustumsSettings};
 use crate::plugins::metadata::{
     ActiveMetadata, MetadataState, UpdatedMetadataBoundingBoxEvent, UpdatedMetadataHierarchiesEvent,
 };
 use crate::plugins::render::point::Point;
+use crate::plugins::render::BufferSet;
 use crate::plugins::wgpu::Device;
 use crate::sorted_hash::SortedHashMap;
 use crate::transform::Transform;
@@ -76,8 +77,6 @@ pub struct CellPlugin;
 
 impl Plugin for CellPlugin {
     fn build(&self, app: &mut App) {
-        shader::setup(&mut app.world);
-
         app.add_plugins(AssetPlugin::<Cell>::default())
             .insert_state(StreamState::Enabled)
             .insert_resource(frustums::StreamingFrustumsScale::default())
@@ -97,6 +96,15 @@ impl Plugin for CellPlugin {
                 CellStreamingSet
                     .run_if(in_state(MetadataState::Loaded))
                     .run_if(in_state(StreamState::Enabled)),
+            )
+            .add_systems(
+                Startup,
+                (
+                    shader::create_loaded_cells_buffer,
+                    shader::create_frustums_buffer,
+                    shader::create_frustums_settings_buffer,
+                )
+                    .in_set(BufferSet),
             )
             .add_systems(PostStartup, frustums::add_streaming_frustums)
             .add_systems(
@@ -126,21 +134,19 @@ impl Plugin for CellPlugin {
             .add_systems(
                 PostUpdate,
                 (
+                    shader::update_loaded_cells_buffer.run_if(resource_changed::<LoadedCells>),
+                    shader::update_frustums_buffer,
                     (
-                        shader::update_loaded_cells_buffer.run_if(resource_changed::<LoadedCells>),
-                        shader::update_frustums_buffer,
-                        (
-                            shader::set_frustums_settings_max_hierarchy
-                                .run_if(on_event::<UpdatedMetadataHierarchiesEvent>()),
-                            shader::update_frustums_settings_buffer
-                                .run_if(resource_changed::<FrustumsSettings>),
-                        )
-                            .chain(),
-                    ),
-                    shader::update_cells_bind_group,
+                        shader::set_frustums_settings_max_hierarchy
+                            .run_if(on_event::<UpdatedMetadataHierarchiesEvent>()),
+                        shader::update_frustums_settings_buffer
+                            .run_if(resource_changed::<FrustumsSettings>),
+                    )
+                        .chain(),
                 )
                     .chain()
-                    .in_set(CellStreamingSet),
+                    .in_set(CellStreamingSet)
+                    .in_set(BufferSet),
             );
     }
 }
@@ -231,34 +237,16 @@ pub struct CellHeader(pub point_converter::cell::Header);
 struct CellBundle {
     cell_handle: AssetHandle<Cell>,
     header: CellHeader,
-    cell_bind_group_data: CellBindGroupData,
+    buffer_bundle: CellBufferBundle,
     visibility: Visibility,
 }
 
 impl CellBundle {
-    fn new(
-        cell_handle: AssetHandle<Cell>,
-        cell: &Cell,
-        device: &wgpu::Device,
-        cell_bind_group_layout: &CellBindGroupLayout,
-    ) -> Self {
-        let header = cell.header().clone();
-
-        let points = cell
-            .all_points()
-            .map(|it| Point {
-                position: it.pos,
-                color: it.color,
-            })
-            .collect_vec();
-
-        let cell_bind_group_data =
-            CellBindGroupData::new(device, cell_bind_group_layout, &points, header.id);
-
+    fn new(cell_handle: AssetHandle<Cell>, cell: &Cell, device: &wgpu::Device) -> Self {
         Self {
             cell_handle,
-            header: CellHeader(header),
-            cell_bind_group_data,
+            header: CellHeader(cell.header().clone()),
+            buffer_bundle: CellBufferBundle::new(device, cell),
             visibility: Visibility::new(true),
         }
     }
@@ -269,7 +257,6 @@ fn receive_cell(
     cell_manager: AssetManagerRes<Cell>,
     mut assets_events: EventReader<AssetEvent<Cell>>,
     device: Res<Device>,
-    cell_bind_group_layout: Res<CellBindGroupLayout>,
     visible_cells: Res<VisibleCells>,
     mut loaded_cells: ResMut<LoadedCells>,
     mut missing_cells: ResMut<MissingCells>,
@@ -292,8 +279,7 @@ fn receive_cell(
 
                     // TODO delay reading of cell
                     let cell = cell_manager.get_asset(handle);
-                    let cell_bundle =
-                        CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
+                    let cell_bundle = CellBundle::new(handle.clone(), cell, &device);
                     let entity = commands.spawn(cell_bundle).id();
 
                     loaded_cells.0.insert(*id, entity);
@@ -304,22 +290,9 @@ fn receive_cell(
                     log::debug!("Reloading points for {:?}", handle.id());
 
                     let cell = cell_manager.get_asset(handle);
-                    let points = cell
-                        .all_points()
-                        .map(|it| Point {
-                            position: it.pos,
-                            color: it.color,
-                        })
-                        .collect_vec();
+                    let cell_buffer_bundle = CellBufferBundle::new(&device, cell);
 
-                    let cell_bind_group_data = CellBindGroupData::new(
-                        &device,
-                        &cell_bind_group_layout,
-                        &points,
-                        *handle.id(),
-                    );
-
-                    commands.entity(*entity).insert(cell_bind_group_data);
+                    commands.entity(*entity).insert(cell_buffer_bundle);
                 }
             }
             AssetEvent::Loaded(AssetLoadedEvent::Success { handle }) => {
@@ -334,8 +307,7 @@ fn receive_cell(
 
                 // TODO delay reading of cell
                 let cell = cell_manager.get_asset(handle);
-                let cell_bundle =
-                    CellBundle::new(handle.clone(), cell, &device, &cell_bind_group_layout);
+                let cell_bundle = CellBundle::new(handle.clone(), cell, &device);
 
                 let entity = commands.spawn(cell_bundle).id();
 

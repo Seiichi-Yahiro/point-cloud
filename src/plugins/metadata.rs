@@ -17,6 +17,7 @@ use crate::plugins::asset::{
     AssetPlugin, LoadAssetMsg, MutAsset,
 };
 use crate::plugins::camera::Camera;
+use crate::plugins::render::BufferSet;
 use crate::transform::Transform;
 
 pub mod shader;
@@ -78,14 +79,13 @@ impl Plugin for MetadataPlugin {
             );
         }
 
-        shader::setup(&mut app.world);
-
         app.add_plugins(AssetPlugin::<Metadata>::default())
             .insert_state(MetadataState::NotLoaded)
             .insert_resource(DefaultURL(self.url.clone()))
             .add_event::<UpdateMetadataEvent>()
             .add_event_set::<UpdatedMetadataEventSet>()
             .add_systems(PreStartup, setup)
+            .add_systems(Startup, shader::create_metadata_buffer.in_set(BufferSet))
             .add_systems(
                 Update,
                 receive_metadata.run_if(on_event::<AssetEvent<Metadata>>()),
@@ -97,11 +97,15 @@ impl Plugin for MetadataPlugin {
                     shader::update_metadata_buffer
                         .run_if(on_event::<UpdatedMetadataHierarchiesEvent>()),
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(BufferSet),
             )
             .add_systems(
                 OnEnter(MetadataState::Loaded),
-                (look_at_bounding_box, shader::update_metadata_buffer),
+                (
+                    look_at_bounding_box,
+                    shader::update_metadata_buffer.in_set(BufferSet),
+                ),
             );
     }
 }

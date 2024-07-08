@@ -1,13 +1,12 @@
-use std::ops::Deref;
-
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use glam::{Mat4, UVec2, Vec3, Vec4};
+use glam::{Mat4, UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
+use crate::plugins::render::BufferSet;
 use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
 use crate::plugins::winit::WindowResized;
 use crate::transform::Transform;
@@ -20,40 +19,8 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        let view_projection_bind_group_layout = app
-            .world
-            .get_resource::<Device>()
-            .unwrap()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("view-bind-group-layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::all(),
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::all(),
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        app.insert_resource(ViewBindGroupLayout(view_projection_bind_group_layout));
-
         app.add_plugins(FlyCamPlugin)
-            .add_systems(Startup, setup)
+            .add_systems(Startup, setup.in_set(BufferSet))
             .add_systems(
                 PreUpdate,
                 update_aspect_ratio.run_if(on_event::<WindowResized>()),
@@ -67,7 +34,8 @@ impl Plugin for CameraPlugin {
                 (
                     write_view_projection_uniform,
                     write_viewport_uniform.run_if(resource_changed::<SurfaceConfig>),
-                ),
+                )
+                    .in_set(BufferSet),
             );
     }
 }
@@ -78,23 +46,52 @@ pub struct CameraControlSet;
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, SystemSet)]
 pub struct UpdateFrustum;
 
-#[derive(Resource)]
-pub struct ViewBindGroupLayout(wgpu::BindGroupLayout);
+#[derive(Component)]
+pub struct ViewProjectionBuffer(pub wgpu::Buffer);
 
-impl Deref for ViewBindGroupLayout {
-    type Target = wgpu::BindGroupLayout;
+impl ViewProjectionBuffer {
+    fn new(
+        device: &wgpu::Device,
+        transform: &Transform,
+        projection: &PerspectiveProjection,
+    ) -> Self {
+        let view_mat = transform.compute_matrix().inverse();
+        let projection_mat = projection.compute_matrix();
+        let view_projection_mat = projection_mat * view_mat;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        let matrices = [view_mat, projection_mat, view_projection_mat];
+        let translation = transform.translation.extend(0.0); // extend for alignment
+
+        let a: &[u8] = bytemuck::cast_slice(&matrices);
+        let b: &[u8] = bytemuck::bytes_of(&translation);
+
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("view-projection-uniform"),
+            contents: &[a, b].concat(),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        Self(buffer)
     }
 }
 
 #[derive(Component)]
-pub struct Camera {
-    pub view_projection: wgpu::Buffer,
-    pub viewport: wgpu::Buffer,
-    pub bind_group: wgpu::BindGroup,
+pub struct ViewportBuffer(pub wgpu::Buffer);
+
+impl ViewportBuffer {
+    fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport-uniform"),
+            contents: bytemuck::cast_slice(&[UVec2::new(config.width, config.height)]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        Self(buffer)
+    }
 }
+
+#[derive(Component)]
+pub struct Camera;
 
 #[derive(Debug, Copy, Clone, Component)]
 pub struct Visibility {
@@ -107,74 +104,17 @@ impl Visibility {
     }
 }
 
-fn setup(
-    mut commands: Commands,
-    device: Res<Device>,
-    queue: Res<Queue>,
-    config: Res<SurfaceConfig>,
-    view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
-) {
+fn setup(mut commands: Commands, device: Res<Device>, config: Res<SurfaceConfig>) {
     let transform =
         Transform::from_translation(Vec3::new(0.0, -1.0, 0.0)).looking_at(Vec3::ZERO, Vec3::Z);
 
     let projection = PerspectiveProjection::default();
 
-    let view_projection_uniform = {
-        let view_mat = transform.compute_matrix().inverse();
-        let projection_mat = projection.compute_matrix();
-        let view_projection_mat = projection_mat * view_mat;
-
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("view-projection-uniform"),
-            size: (std::mem::size_of::<Mat4>() * 3 + std::mem::size_of::<Vec4>())
-                as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        queue.write_buffer(
-            &buffer,
-            0,
-            bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
-        );
-
-        queue.write_buffer(
-            &buffer,
-            (std::mem::size_of::<Mat4>() * 3) as wgpu::BufferAddress,
-            bytemuck::bytes_of(&transform.translation),
-        );
-
-        buffer
-    };
-
-    let viewport_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("viewport-uniform"),
-        contents: bytemuck::cast_slice(&[UVec2::new(config.width, config.height)]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let view_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("view-bind-group"),
-        layout: &view_projection_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: view_projection_uniform.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: viewport_uniform.as_entire_binding(),
-            },
-        ],
-    });
-
     commands.spawn((
-        Camera {
-            view_projection: view_projection_uniform,
-            viewport: viewport_uniform,
-            bind_group: view_bind_group,
-        },
+        Camera,
         FlyCamController::new(),
+        ViewProjectionBuffer::new(&device, &transform, &projection),
+        ViewportBuffer::new(&device, &config),
         transform,
         projection,
         Frustum::default(),
@@ -210,23 +150,26 @@ fn update_frustum(
 fn write_view_projection_uniform(
     queue: Res<Queue>,
     view_projection_query: Query<
-        (&Camera, &Transform, &PerspectiveProjection),
-        Or<(Changed<Transform>, Changed<PerspectiveProjection>)>,
+        (&Transform, &PerspectiveProjection, &ViewProjectionBuffer),
+        (
+            With<Camera>,
+            Or<(Changed<Transform>, Changed<PerspectiveProjection>)>,
+        ),
     >,
 ) {
-    for (camera, transform, projection) in view_projection_query.iter() {
+    for (transform, projection, buffer) in view_projection_query.iter() {
         let view_mat = transform.compute_matrix().inverse();
         let projection_mat = projection.compute_matrix();
         let view_projection_mat = projection_mat * view_mat;
 
         queue.write_buffer(
-            &camera.view_projection,
+            &buffer.0,
             0,
             bytemuck::cast_slice(&[view_mat, projection_mat, view_projection_mat]),
         );
 
         queue.write_buffer(
-            &camera.view_projection,
+            &buffer.0,
             (std::mem::size_of::<Mat4>() * 3) as wgpu::BufferAddress,
             bytemuck::bytes_of(&transform.translation),
         );
@@ -236,11 +179,11 @@ fn write_view_projection_uniform(
 fn write_viewport_uniform(
     queue: Res<Queue>,
     config: Res<SurfaceConfig>,
-    camera_query: Query<&Camera>,
+    camera_query: Query<&ViewportBuffer, With<Camera>>,
 ) {
-    for camera in camera_query.iter() {
+    for buffer in camera_query.iter() {
         queue.write_buffer(
-            &camera.viewport,
+            &buffer.0,
             0,
             bytemuck::cast_slice(&[UVec2::new(config.width, config.height)]),
         );

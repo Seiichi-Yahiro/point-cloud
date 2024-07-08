@@ -24,6 +24,25 @@ struct Hierarchy {
 @group(1) @binding(0)
 var<storage, read> metadata: Metadata;
 
+struct LoadedCells {
+    len: u32,
+    cells: array<Cell>
+}
+
+@group(1) @binding(1)
+var<storage, read> loaded_cells: LoadedCells;
+
+@group(1) @binding(2)
+var<storage, read> frustums_far_distances: array<f32>;
+
+struct FrustumsSettings {
+    size_by_distance: u32, // bool
+    max_hierarchy: u32
+}
+
+@group(1) @binding(3)
+var<uniform> frustums_settings: FrustumsSettings;
+
 struct Point {
     position: vec3<f32>,
     color: u32 // vec4<u8>
@@ -54,25 +73,6 @@ struct Cell {
 
 @group(2) @binding(3)
 var<uniform> cell: Cell;
-
-struct LoadedCells {
-    len: u32,
-    cells: array<Cell>
-}
-
-@group(3) @binding(0)
-var<storage, read> loaded_cells: LoadedCells;
-
-@group(3) @binding(1)
-var<storage, read> frustums_far_distances: array<f32>;
-
-struct FrustumsSettings {
-    size_by_distance: u32, // bool
-    max_hierarchy: u32
-}
-
-@group(3) @binding(2)
-var<uniform> frustums_settings: FrustumsSettings;
 
 fn cell_index(position: vec3<f32>, cell_size: f32) -> vec3<i32> {
     return vec3<i32>(floor(position / cell_size));

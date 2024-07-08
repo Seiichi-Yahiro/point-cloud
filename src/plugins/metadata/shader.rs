@@ -12,45 +12,13 @@ struct Hierarchy {
 }
 
 #[derive(Resource)]
-pub struct MetadataBindGroupData {
-    pub layout: wgpu::BindGroupLayout,
-    pub group: wgpu::BindGroup,
-    buffer: wgpu::Buffer,
-    buffer_capacity: usize,
+pub struct MetadataBuffer {
+    pub buffer: wgpu::Buffer,
+    capacity: usize,
 }
 
-impl MetadataBindGroupData {
-    pub fn new(device: &wgpu::Device) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("metadata-bind-group-layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        let buffer_capacity = 0;
-        let (buffer, group) = Self::create_buffer_and_bind_group(buffer_capacity, device, &layout);
-
-        Self {
-            layout,
-            group,
-            buffer,
-            buffer_capacity,
-        }
-    }
-
-    fn create_buffer_and_bind_group(
-        capacity: usize,
-        device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
-    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+impl MetadataBuffer {
+    fn new(device: &wgpu::Device, capacity: usize) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("metadata-buffer"),
             size: (std::mem::size_of::<u32>() + std::mem::size_of::<Hierarchy>() * capacity)
@@ -59,30 +27,19 @@ impl MetadataBindGroupData {
             mapped_at_creation: false,
         });
 
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("metadata-bind-group"),
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
-
-        (buffer, group)
+        Self { buffer, capacity }
     }
+}
 
-    fn set_capacity(&mut self, capacity: usize, device: &wgpu::Device) {
-        let (buffer, group) = Self::create_buffer_and_bind_group(capacity, device, &self.layout);
-        self.buffer = buffer;
-        self.group = group;
-        self.buffer_capacity = capacity;
-    }
+pub(in crate::plugins) fn create_metadata_buffer(mut commands: Commands, device: Res<Device>) {
+    let buffer = MetadataBuffer::new(&device, 0);
+    commands.insert_resource(buffer);
 }
 
 pub(in crate::plugins) fn update_metadata_buffer(
     device: Res<Device>,
     queue: Res<Queue>,
-    mut metadata_bind_group_data: ResMut<MetadataBindGroupData>,
+    mut metadata_buffer: ResMut<MetadataBuffer>,
     active_metadata: ActiveMetadata,
 ) {
     let metadata = active_metadata.get();
@@ -96,27 +53,21 @@ pub(in crate::plugins) fn update_metadata_buffer(
         })
         .collect_vec();
 
-    if hierarchies.len() != metadata_bind_group_data.buffer_capacity {
-        metadata_bind_group_data.set_capacity(hierarchies.len(), &device);
+    if hierarchies.len() != metadata_buffer.capacity {
+        *metadata_buffer = MetadataBuffer::new(&device, hierarchies.len());
     }
 
     queue.write_buffer(
-        &metadata_bind_group_data.buffer,
+        &metadata_buffer.buffer,
         0,
         bytemuck::bytes_of(&(hierarchies.len() as u32)),
     );
 
     if !hierarchies.is_empty() {
         queue.write_buffer(
-            &metadata_bind_group_data.buffer,
+            &metadata_buffer.buffer,
             std::mem::size_of::<u32>() as wgpu::BufferAddress,
             bytemuck::cast_slice(&hierarchies),
         );
     }
-}
-
-pub(in crate::plugins) fn setup(world: &mut World) {
-    let device = world.get_resource::<Device>().unwrap();
-    let metadata_bind_group_data = MetadataBindGroupData::new(device);
-    world.insert_resource(metadata_bind_group_data);
 }

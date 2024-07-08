@@ -2,8 +2,10 @@ use bevy_app::*;
 use bevy_ecs::prelude::*;
 use glam::Vec3;
 
-use crate::plugins::camera::{Camera, ViewBindGroupLayout};
+use crate::plugins::camera::Camera;
+use crate::plugins::render::bind_groups::camera::{CameraBindGroup, CameraBindGroupLayout};
 use crate::plugins::render::vertex::VertexBuffer;
+use crate::plugins::render::PipelineSet;
 use crate::plugins::wgpu::{
     CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
 };
@@ -36,7 +38,7 @@ pub struct LineRenderPlugin;
 
 impl Plugin for LineRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
+        app.add_systems(Startup, setup.in_set(PipelineSet))
             .add_systems(Render, draw.in_set(RenderPassSet));
 
         app.world
@@ -55,13 +57,13 @@ fn setup(
     mut commands: Commands,
     device: Res<Device>,
     config: Res<SurfaceConfig>,
-    view_projection_bind_group_layout: Res<ViewBindGroupLayout>,
+    camera_bind_group_layout: Res<CameraBindGroupLayout>,
 ) {
     let shader = device.create_shader_module(wgpu::include_wgsl!("line/line.wgsl"));
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("line-renderer-pipeline-layout"),
-        bind_group_layouts: &[&view_projection_bind_group_layout],
+        bind_group_layouts: &[&camera_bind_group_layout.0],
         push_constant_ranges: &[],
     });
 
@@ -112,7 +114,7 @@ fn setup(
 fn draw(
     mut global_render_resources: GlobalRenderResources,
     local_render_resources: Res<RenderResources>,
-    camera_query: Query<&Camera>,
+    camera_query: Query<&CameraBindGroup, With<Camera>>,
     vertex_buffers: Query<&VertexBuffer<Line>>,
 ) {
     global_render_resources
@@ -140,9 +142,9 @@ fn draw(
                 occlusion_query_set: None,
             });
 
-            for camera in camera_query.iter() {
+            for camera_bind_group in camera_query.iter() {
                 render_pass.set_pipeline(&local_render_resources.pipeline);
-                render_pass.set_bind_group(0, &camera.bind_group, &[]);
+                render_pass.set_bind_group(0, &camera_bind_group.0, &[]);
 
                 for vertex_buffer in vertex_buffers.iter() {
                     render_pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
