@@ -76,9 +76,9 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     let cam_right = view_t[0].xyz;
     let cam_up = view_t[1].xyz;
 
-    let unpackedColor = unpack4x8(instance.color);
+    let unpacked_color = unpack4x8(instance.color);
 
-    let hierarchy = unpackedColor.w;
+    let hierarchy = unpacked_color.w;
     let radius = metadata.hierarchies[hierarchy].spacing;
 
     let local_splat_position = get_splat_position(vertex.index, radius);
@@ -87,7 +87,7 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
 
     out.view_pos = (vp.view * billboard_position).xyz;
     out.clip_position = vp.view_proj * billboard_position;
-    out.color = vec4<f32>(vec3<f32>(unpackedColor.xyz) / 255.0, 1.0);
+    out.color = vec4<f32>(vec3<f32>(unpacked_color.xyz) / 255.0, 1.0);
     out.splat_pos = local_splat_position;
     out.splat_radius = radius;
 

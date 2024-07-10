@@ -182,13 +182,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if all(abs(ndc.xy) <= vec2(1.0)) && abs(ndc.z - 0.5) <= 0.5 {
         let uv = vec2<u32>((ndc.xy * vec2(0.5, -0.5) + 0.5) * vec2<f32>(textureDimensions(depth_texture)));
         let depth = textureLoad(depth_texture, uv, 0);
-
+       
         if ndc.z < depth || abs(depth - ndc.z) < 0.00001 || distance(input.position, vp.cam_pos) <= 50.0 {
             let hierarchy = get_hierarchy(input.position);
-            let unpackedColor = unpack4x8(input.color);
+            let unpacked_color = unpack4x8(input.color);
 
             var output = input;
-            output.color = pack4x8(vec4(unpackedColor.xyz, hierarchy));
+            output.color = pack4x8(vec4(unpacked_color.xyz, hierarchy));
 
             let old_index = atomicAdd(&indirect_buffer.instance_count, 1u);
             out[old_index] = output;
