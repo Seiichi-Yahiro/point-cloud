@@ -6,9 +6,9 @@ use egui_wgpu::{Renderer, ScreenDescriptor};
 use egui_winit::State;
 
 use crate::plugins::wgpu::{
-    CommandEncoders, Device, GlobalRenderResources, Queue, Render, RenderPassSet, SurfaceConfig,
+    CommandEncoders, Device, GlobalRenderResources, Queue, RenderPassSet, SurfaceConfig,
 };
-use crate::plugins::winit::{Window, WindowEvent};
+use crate::plugins::winit::{Render, Window, WindowEvent};
 
 pub struct UiPlugin;
 

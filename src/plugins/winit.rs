@@ -5,6 +5,7 @@ use bevy_app::prelude::*;
 use bevy_app::{AppExit, PluginsState};
 use bevy_ecs::event::ManualEventReader;
 use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::ScheduleLabel;
 use cfg_if::cfg_if;
 use web_time::{Duration, Instant};
 use winit::dpi::PhysicalSize;
@@ -86,12 +87,15 @@ impl Plugin for WinitPlugin {
         app.add_event::<WindowEvent>();
         app.add_event::<WindowResized>();
         app.insert_non_send_resource(event_loop);
-        app.insert_resource(Window(window));
+        app.insert_resource(Window(window.clone()));
+
+        app.add_schedule(Schedule::new(Render));
 
         app.set_runner(move |mut app| {
             if app.plugins_state() == PluginsState::Ready {
                 app.finish();
                 app.cleanup();
+                app.update();
             }
 
             let event_loop = app
@@ -101,6 +105,8 @@ impl Plugin for WinitPlugin {
 
             event_loop.set_control_flow(ControlFlow::Poll);
             let mut last_frame_time = Instant::now();
+            let mut accumulated_time = Duration::from_millis(0);
+            let frame_duration = Duration::from_secs_f64(1.0 / 60.0);
 
             let mut app_exit_event_reader = ManualEventReader::<AppExit>::default();
 
@@ -119,13 +125,7 @@ impl Plugin for WinitPlugin {
 
                     match event {
                         Event::AboutToWait => {
-                            let current_time = Instant::now();
-                            let delta_time = current_time - last_frame_time;
-
-                            if delta_time >= Duration::from_secs_f64(1.0 / 60.0) {
-                                last_frame_time = current_time;
-                                app.update();
-                            }
+                            window.request_redraw();
                         }
                         Event::WindowEvent {
                             event: window_event,
@@ -134,7 +134,24 @@ impl Plugin for WinitPlugin {
                             app.world.send_event(WindowEvent(window_event.clone()));
 
                             match window_event {
-                                winit::event::WindowEvent::RedrawRequested => {}
+                                winit::event::WindowEvent::RedrawRequested => {
+                                    let current_time = Instant::now();
+                                    let mut delta_time = current_time - last_frame_time;
+
+                                    if delta_time > frame_duration {
+                                        delta_time = frame_duration;
+                                    }
+
+                                    accumulated_time += delta_time;
+
+                                    while accumulated_time >= frame_duration {
+                                        app.update();
+                                        accumulated_time -= frame_duration;
+                                    }
+
+                                    app.world.run_schedule(Render);
+                                    last_frame_time = current_time;
+                                }
                                 winit::event::WindowEvent::Resized(new_size) => {
                                     app.world
                                         .send_event(WindowResized {
@@ -166,3 +183,6 @@ impl Plugin for WinitPlugin {
         });
     }
 }
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, ScheduleLabel)]
+pub struct Render;

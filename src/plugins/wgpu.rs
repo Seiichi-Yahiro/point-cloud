@@ -2,15 +2,14 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use bevy_app::prelude::*;
-use bevy_app::{AppExit, MainScheduleOrder};
+use bevy_app::AppExit;
 use bevy_ecs::prelude::*;
-use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::system::SystemParam;
 use egui::ahash::HashMapExt;
 use rustc_hash::FxHashMap;
 use wgpu::{SurfaceError, TextureFormat};
 
-use crate::plugins::winit::{Window, WindowResized};
+use crate::plugins::winit::{Render, Window, WindowResized};
 use crate::texture::Texture;
 
 #[derive(Resource)]
@@ -104,7 +103,7 @@ impl WGPUPlugin {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: Vec::new(),
             desired_maximum_frame_latency: 2,
@@ -128,10 +127,6 @@ impl WGPUPlugin {
                 .run_if(on_event::<WindowResized>()),
         );
 
-        app.add_schedule(Schedule::new(Render));
-        let mut main_schedule_order = app.world.resource_mut::<MainScheduleOrder>();
-        main_schedule_order.insert_after(Last, Render);
-
         app.configure_sets(Render, RenderPassSet.run_if(resource_exists::<RenderView>));
 
         app.add_systems(
@@ -144,9 +139,6 @@ impl WGPUPlugin {
         );
     }
 }
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, ScheduleLabel)]
-pub struct Render;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, SystemSet)]
 pub struct RenderPassSet;

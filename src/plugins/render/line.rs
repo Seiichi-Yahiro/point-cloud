@@ -7,8 +7,9 @@ use crate::plugins::render::bind_groups::camera::{CameraBindGroup, CameraBindGro
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::render::PipelineSet;
 use crate::plugins::wgpu::{
-    CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
+    CommandEncoders, Device, GlobalRenderResources, RenderPassSet, SurfaceConfig,
 };
+use crate::plugins::winit::Render;
 use crate::texture::Texture;
 
 pub mod utils;
