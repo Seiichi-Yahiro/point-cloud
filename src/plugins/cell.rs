@@ -164,7 +164,7 @@ fn set_view_distance(
 pub struct CellStreamingSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
-enum StreamState {
+pub enum StreamState {
     Enabled,
     Paused,
 }

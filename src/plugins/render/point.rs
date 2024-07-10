@@ -4,9 +4,11 @@ use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::cell::shader::{
     CellIndirectBuffer, CellInputVertexBuffer, CellOutputVertexBuffer,
 };
+use crate::plugins::cell::{CellHeader, StreamState};
 use crate::plugins::render::bind_groups::camera::CameraBindGroup;
 use crate::plugins::render::bind_groups::cell::CellBindGroup;
 use crate::plugins::render::bind_groups::resource::ResourceBindGroup;
+use crate::plugins::render::bind_groups::texture::TextureBindGroup;
 use crate::plugins::render::point::pipelines::compute::PointComputePipeLine;
 use crate::plugins::render::point::pipelines::render::PointRenderPipeline;
 use crate::plugins::render::{bind_groups, BindGroupLayoutSet, BindGroupSet, PipelineSet};
@@ -48,12 +50,14 @@ impl Plugin for PointRenderPlugin {
                     bind_groups::resource::create_bind_group_layout,
                     bind_groups::camera::create_bind_group_layout,
                     bind_groups::cell::create_bind_group_layout,
+                    bind_groups::texture::create_bind_group_layout,
                 )
                     .in_set(BindGroupLayoutSet),
                 (
                     bind_groups::resource::create_bind_group,
                     bind_groups::camera::create_bind_group,
                     bind_groups::cell::create_bind_group,
+                    bind_groups::texture::create_bind_group,
                 )
                     .in_set(BindGroupSet),
                 (
@@ -75,6 +79,7 @@ impl Plugin for PointRenderPlugin {
                     bind_groups::cell::update_bind_group,
                     bind_groups::cell::create_bind_group,
                 ),
+                bind_groups::texture::create_bind_group,
             )
                 .in_set(BindGroupSet),
         )
@@ -97,79 +102,96 @@ fn draw(
         &CellInputVertexBuffer,
         &CellOutputVertexBuffer,
         &CellIndirectBuffer,
+        &CellHeader,
         &Visibility,
     )>,
     resource_bind_group: Res<ResourceBindGroup>,
+    texture_bind_group: Res<TextureBindGroup>,
+    stream_state: Res<State<StreamState>>,
 ) {
     global_render_resources
         .encoders
         .encode::<PointRenderPlugin>(|encoder| {
-            let cells = cell_query
+            let cell_groups = cell_query
                 .iter()
-                .filter(|(_, _, _, _, visibility)| visibility.visible)
-                .collect_vec();
+                .filter(|(_, _, _, _, _, visibility)| visibility.visible)
+                .sorted_unstable_by(|a, b| a.4 .0.id.hierarchy.cmp(&b.4 .0.id.hierarchy))
+                .rev()
+                .group_by(|it| it.4 .0.id.hierarchy);
 
-            for (_cell_bind_group, _cell_input, _cell_output, cell_indirect, _) in &cells {
-                encoder.clear_buffer(
-                    &cell_indirect.0,
-                    std::mem::size_of::<u32>() as wgpu::BufferAddress,
-                    Some(std::mem::size_of::<u32>() as wgpu::BufferAddress),
-                );
-            }
+            for (_hierarchy, group) in &cell_groups {
+                let cells = group.collect_vec();
 
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("point-compute-pass"),
-                timestamp_writes: None,
-            });
+                if *stream_state == StreamState::Enabled {
+                    for (_cell_bind_group, _cell_input, _cell_output, cell_indirect, _, _) in &cells
+                    {
+                        encoder.clear_buffer(
+                            &cell_indirect.0,
+                            std::mem::size_of::<u32>() as wgpu::BufferAddress,
+                            Some(std::mem::size_of::<u32>() as wgpu::BufferAddress),
+                        );
+                    }
 
-            compute_pass.set_pipeline(&compute_pipeline.0);
+                    let mut compute_pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("point-compute-pass"),
+                            timestamp_writes: None,
+                        });
 
-            for camera_bind_group in camera_query.iter() {
-                compute_pass.set_bind_group(0, &camera_bind_group.0, &[]);
-                compute_pass.set_bind_group(1, &resource_bind_group.0, &[]);
+                    compute_pass.set_pipeline(&compute_pipeline.0);
+                    compute_pass.set_bind_group(1, &resource_bind_group.0, &[]);
+                    compute_pass.set_bind_group(3, &texture_bind_group.0, &[]);
 
-                for (cell_bind_group, cell_input, _cell_output, _cell_indirect, _) in &cells {
-                    compute_pass.set_bind_group(2, &cell_bind_group.0, &[]);
-                    compute_pass.dispatch_workgroups(cell_input.len().div_ceil(128), 1, 1);
+                    for camera_bind_group in camera_query.iter() {
+                        compute_pass.set_bind_group(0, &camera_bind_group.0, &[]);
+
+                        for (cell_bind_group, cell_input, _cell_output, _cell_indirect, _, _) in
+                            &cells
+                        {
+                            compute_pass.set_bind_group(2, &cell_bind_group.0, &[]);
+                            compute_pass.dispatch_workgroups(cell_input.len().div_ceil(128), 1, 1);
+                        }
+                    }
+
+                    drop(compute_pass);
                 }
-            }
 
-            drop(compute_pass);
-
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("point-render-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &global_render_resources.render_view.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &global_render_resources.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("point-render-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &global_render_resources.render_view.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &global_render_resources.depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
                     }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
 
-            render_pass.set_pipeline(&render_pipeline.0);
-
-            for camera_bind_group in camera_query.iter() {
-                render_pass.set_bind_group(0, &camera_bind_group.0, &[]);
+                render_pass.set_pipeline(&render_pipeline.0);
                 render_pass.set_bind_group(1, &resource_bind_group.0, &[]);
 
-                for (_cell_bind_group, _cell_input, cell_output, cell_indirect, _) in &cells {
-                    render_pass.set_vertex_buffer(0, cell_output.0.slice(..));
-                    render_pass.draw_indirect(&cell_indirect.0, 0);
-                }
-            }
+                for camera_bind_group in camera_query.iter() {
+                    render_pass.set_bind_group(0, &camera_bind_group.0, &[]);
 
-            drop(render_pass);
+                    for (_cell_bind_group, _cell_input, cell_output, cell_indirect, _, _) in &cells
+                    {
+                        render_pass.set_vertex_buffer(0, cell_output.0.slice(..));
+                        render_pass.draw_indirect(&cell_indirect.0, 0);
+                    }
+                }
+
+                drop(render_pass);
+            }
         });
 }
