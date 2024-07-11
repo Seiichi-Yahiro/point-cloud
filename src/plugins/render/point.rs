@@ -1,10 +1,11 @@
 mod pipelines;
 
+use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::cell::shader::{
     CellIndirectBuffer, CellInputVertexBuffer, CellOutputVertexBuffer,
 };
-use crate::plugins::cell::{CellHeader, StreamState};
+use crate::plugins::cell::{CellHeader, LoadedCells, StreamState};
 use crate::plugins::render::bind_groups::camera::CameraBindGroup;
 use crate::plugins::render::bind_groups::cell::CellBindGroup;
 use crate::plugins::render::bind_groups::resource::ResourceBindGroup;
@@ -17,6 +18,8 @@ use crate::plugins::winit::Render;
 use crate::transform::Transform;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_ecs::query::QueryData;
+use bevy_ecs::system::SystemParam;
 use glam::Vec3;
 use itertools::Itertools;
 
@@ -93,46 +96,57 @@ impl Plugin for PointRenderPlugin {
     }
 }
 
+#[derive(QueryData)]
+struct CellQueryData {
+    bind_group: &'static CellBindGroup,
+    input: &'static CellInputVertexBuffer,
+    output: &'static CellOutputVertexBuffer,
+    indirect: &'static CellIndirectBuffer,
+    header: &'static CellHeader,
+    visibility: &'static Visibility,
+}
+
+#[derive(SystemParam)]
+struct RenderResources<'w> {
+    compute_pipeline: Res<'w, PointComputePipeLine>,
+    render_pipeline: Res<'w, PointRenderPipeline>,
+    resource_bind_group: Res<'w, ResourceBindGroup>,
+    texture_bind_group: Res<'w, TextureBindGroup>,
+}
+
 fn draw(
     mut global_render_resources: GlobalRenderResources,
-    compute_pipeline: Res<PointComputePipeLine>,
-    render_pipeline: Res<PointRenderPipeline>,
-    camera_query: Query<(&CameraBindGroup, &Transform), With<Camera>>,
-    cell_query: Query<(
-        &CellBindGroup,
-        &CellInputVertexBuffer,
-        &CellOutputVertexBuffer,
-        &CellIndirectBuffer,
-        &CellHeader,
-        &Visibility,
-    )>,
-    resource_bind_group: Res<ResourceBindGroup>,
-    texture_bind_group: Res<TextureBindGroup>,
+    render_resources: RenderResources,
+    camera_query: Query<(&CameraBindGroup, &Transform, Ref<Frustum>), With<Camera>>,
+    cell_query: Query<CellQueryData>,
     stream_state: Res<State<StreamState>>,
+    loaded_cells: Res<LoadedCells>,
 ) {
     global_render_resources
         .encoders
         .encode::<PointRenderPlugin>(|encoder| {
-            for (camera_bind_group, camera_transform) in camera_query.iter() {
+            for (camera_bind_group, camera_transform, frustum) in camera_query.iter() {
                 let cell_groups = cell_query
                     .iter()
-                    .filter(|(_, _, _, _, _, visibility)| visibility.visible)
-                    .map(|it| {
+                    .filter(|cell| cell.visibility.visible)
+                    .map(|cell| {
                         (
-                            it,
-                            it.4 .0.pos.distance(camera_transform.translation) as u32,
+                            cell.header.0.pos.distance(camera_transform.translation) as u32,
+                            cell,
                         )
                     })
-                    .sorted_unstable_by_key(|(_, distance)| *distance)
-                    .group_by(|(_, distance)| distance.checked_ilog2().unwrap_or(0));
+                    .sorted_unstable_by_key(|(distance, _)| *distance)
+                    .group_by(|(distance, _)| distance.checked_ilog2().unwrap_or(0));
 
                 for (_, group) in &cell_groups {
-                    let cells = group.map(|(it, _)| (it.0, it.1, it.2, it.3)).collect_vec();
+                    let cells = group.map(|(_, cell)| cell).collect_vec();
 
-                    if *stream_state == StreamState::Enabled {
-                        for (_bind_group, _input, _output, indirect) in &cells {
+                    if (frustum.is_changed() || loaded_cells.is_changed())
+                        && *stream_state == StreamState::Enabled
+                    {
+                        for cell in &cells {
                             encoder.clear_buffer(
-                                &indirect.0,
+                                &cell.indirect.0,
                                 std::mem::size_of::<u32>() as wgpu::BufferAddress,
                                 Some(std::mem::size_of::<u32>() as wgpu::BufferAddress),
                             );
@@ -144,14 +158,18 @@ fn draw(
                                 timestamp_writes: None,
                             });
 
-                        compute_pass.set_pipeline(&compute_pipeline.0);
+                        compute_pass.set_pipeline(&render_resources.compute_pipeline.0);
                         compute_pass.set_bind_group(0, &camera_bind_group.0, &[]);
-                        compute_pass.set_bind_group(1, &resource_bind_group.0, &[]);
-                        compute_pass.set_bind_group(3, &texture_bind_group.0, &[]);
+                        compute_pass.set_bind_group(
+                            1,
+                            &render_resources.resource_bind_group.0,
+                            &[],
+                        );
+                        compute_pass.set_bind_group(3, &render_resources.texture_bind_group.0, &[]);
 
-                        for (bind_group, input, _output, _indirect) in &cells {
-                            compute_pass.set_bind_group(2, &bind_group.0, &[]);
-                            compute_pass.dispatch_workgroups(input.len().div_ceil(128), 1, 1);
+                        for cell in &cells {
+                            compute_pass.set_bind_group(2, &cell.bind_group.0, &[]);
+                            compute_pass.dispatch_workgroups(cell.input.len().div_ceil(128), 1, 1);
                         }
 
                         drop(compute_pass);
@@ -179,13 +197,13 @@ fn draw(
                         occlusion_query_set: None,
                     });
 
-                    render_pass.set_pipeline(&render_pipeline.0);
+                    render_pass.set_pipeline(&render_resources.render_pipeline.0);
                     render_pass.set_bind_group(0, &camera_bind_group.0, &[]);
-                    render_pass.set_bind_group(1, &resource_bind_group.0, &[]);
+                    render_pass.set_bind_group(1, &render_resources.resource_bind_group.0, &[]);
 
-                    for (_bind_group, _input, output, indirect) in &cells {
-                        render_pass.set_vertex_buffer(0, output.0.slice(..));
-                        render_pass.draw_indirect(&indirect.0, 0);
+                    for cell in &cells {
+                        render_pass.set_vertex_buffer(0, cell.output.0.slice(..));
+                        render_pass.draw_indirect(&cell.indirect.0, 0);
                     }
 
                     drop(render_pass);
