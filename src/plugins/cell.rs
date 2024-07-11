@@ -311,7 +311,12 @@ fn receive_cell(
 
                 let entity = commands.spawn(cell_bundle).id();
 
-                loaded_cells.0.insert(*id, entity);
+                if let Some(old) = loaded_cells.0.insert(*id, entity) {
+                    log::warn!("Loaded cell {:?} already existed", id);
+                    if let Some(mut entity_commands) = commands.get_entity(old) {
+                        entity_commands.despawn();
+                    }
+                }
             }
             AssetEvent::Loaded(AssetLoadedEvent::Error { id, error }) => {
                 if !loading_cells.loading.remove(id) {
