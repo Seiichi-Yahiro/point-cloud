@@ -138,12 +138,13 @@ fn draw(
                     .sorted_unstable_by_key(|(distance, _)| *distance)
                     .group_by(|(distance, _)| distance.checked_ilog2().unwrap_or(0));
 
+                let filter_occluded_points = (frustum.is_changed() || loaded_cells.is_changed())
+                    && *stream_state == StreamState::Enabled;
+
                 for (_, group) in &cell_groups {
                     let cells = group.map(|(_, cell)| cell).collect_vec();
 
-                    if (frustum.is_changed() || loaded_cells.is_changed())
-                        && *stream_state == StreamState::Enabled
-                    {
+                    if filter_occluded_points {
                         for cell in &cells {
                             encoder.clear_buffer(
                                 &cell.indirect.0,
