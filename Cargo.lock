@@ -442,6 +442,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_math"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f06daa26ffb82d90ba772256c0ba286f6c305c392f6976c9822717974805837c"
+dependencies = [
+ "glam 0.25.0",
+ "serde",
+]
+
+[[package]]
 name = "bevy_ptr"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -453,12 +463,15 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccbd7de21d586457a340a0962ad0747dc5098ff925eb6b27a918c4bdd8252f7b"
 dependencies = [
+ "bevy_math",
  "bevy_ptr",
  "bevy_reflect_derive",
  "bevy_utils",
  "downcast-rs",
  "erased-serde",
+ "glam 0.25.0",
  "serde",
+ "smol_str",
  "thiserror",
 ]
 
@@ -487,6 +500,20 @@ dependencies = [
  "concurrent-queue",
  "futures-lite",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "bevy_time"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38ea5ae9fe7f56f555dbb05a88d34931907873e3f0c7dc426591839eef72fe3e"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "bevy_utils",
+ "crossbeam-channel",
+ "thiserror",
 ]
 
 [[package]]
@@ -612,7 +639,7 @@ dependencies = [
 name = "bounding-volume"
 version = "0.1.0"
 dependencies = [
- "glam",
+ "glam 0.27.0",
  "serde",
 ]
 
@@ -959,6 +986,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -1465,6 +1501,16 @@ dependencies = [
  "khronos_api",
  "log",
  "xml-rs",
+]
+
+[[package]]
+name = "glam"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
+dependencies = [
+ "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -2219,6 +2265,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
+ "bevy_time",
  "bounding-volume",
  "bytemuck",
  "bytesize",
@@ -2232,7 +2279,7 @@ dependencies = [
  "ehttp",
  "env_logger",
  "flume",
- "glam",
+ "glam 0.27.0",
  "itertools",
  "js-sys",
  "log",
@@ -2262,7 +2309,7 @@ dependencies = [
  "clap",
  "clap_derive",
  "env_logger",
- "glam",
+ "glam 0.27.0",
  "itertools",
  "las",
  "log",

@@ -1,6 +1,7 @@
 use crate::plugins::camera::CameraControlSet;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_time::Time;
 use glam::{EulerRot, Quat, Vec3};
 use winit::event::{MouseButton, MouseScrollDelta};
 use winit::keyboard::KeyCode;
@@ -12,12 +13,8 @@ pub struct FlyCamPlugin;
 
 impl Plugin for FlyCamPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (update_movement_speed, update)
-                .in_set(CameraControlSet)
-                .chain(),
-        );
+        app.add_systems(Update, update_movement_speed.in_set(CameraControlSet))
+            .add_systems(FixedUpdate, update.in_set(CameraControlSet));
     }
 }
 
@@ -30,15 +27,15 @@ pub struct FlyCamController {
 }
 
 impl FlyCamController {
-    const MIN_MOVEMENT_SPEED: f32 = 0.1;
-    const MAX_MOVEMENT_SPEED: f32 = 20.0;
-    const MOVEMENT_SPEED_STEP: f32 = 0.1;
+    const MIN_MOVEMENT_SPEED: f32 = 5.0;
+    const MAX_MOVEMENT_SPEED: f32 = 1000.0;
+    const MOVEMENT_SPEED_STEP: f32 = 5.0;
 
     pub fn new() -> Self {
         Self {
             keybindings: FlyCamKeybindings::default(),
-            mouse_sensitivity: 0.002,
-            movement_speed: 1.0,
+            mouse_sensitivity: 0.15,
+            movement_speed: 50.0,
             look_around: false,
         }
     }
@@ -74,6 +71,7 @@ fn update(
     pressed_keys: Res<PressedKeys>,
     pressed_mouse_buttons: Res<PressedMouseButtons>,
     mut cursor_events: EventReader<CursorEvent>,
+    time: Res<Time>,
 ) {
     for (mut fly_cam, mut transform) in query.iter_mut() {
         let forward = transform.forward();
@@ -106,14 +104,16 @@ fn update(
             velocity -= up;
         }
 
-        velocity = velocity.normalize_or_zero() * fly_cam.movement_speed;
+        velocity = velocity.normalize_or_zero() * fly_cam.movement_speed * time.delta_seconds();
 
         fly_cam.look_around = pressed_mouse_buttons.is_pressed(&fly_cam.keybindings.look_around);
 
         if fly_cam.look_around {
             for cursor_event in cursor_events.read() {
-                let relative_yaw = -cursor_event.delta.x as f32 * fly_cam.mouse_sensitivity;
-                let relative_pitch = -cursor_event.delta.y as f32 * fly_cam.mouse_sensitivity;
+                let relative_yaw =
+                    -cursor_event.delta.x as f32 * fly_cam.mouse_sensitivity * time.delta_seconds();
+                let relative_pitch =
+                    -cursor_event.delta.y as f32 * fly_cam.mouse_sensitivity * time.delta_seconds();
 
                 transform.rotation *= Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
 

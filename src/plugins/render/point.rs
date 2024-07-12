@@ -1,4 +1,9 @@
-mod pipelines;
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_ecs::query::QueryData;
+use bevy_ecs::system::SystemParam;
+use glam::Vec3;
+use itertools::Itertools;
 
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::{Camera, Visibility};
@@ -13,15 +18,10 @@ use crate::plugins::render::bind_groups::texture::TextureBindGroup;
 use crate::plugins::render::point::pipelines::compute::PointComputePipeLine;
 use crate::plugins::render::point::pipelines::render::PointRenderPipeline;
 use crate::plugins::render::{bind_groups, BindGroupLayoutSet, BindGroupSet, PipelineSet};
-use crate::plugins::wgpu::{CommandEncoders, GlobalRenderResources, RenderPassSet};
-use crate::plugins::winit::Render;
+use crate::plugins::wgpu::{CommandEncoders, GlobalRenderResources, Render, RenderPassSet};
 use crate::transform::Transform;
-use bevy_app::prelude::*;
-use bevy_ecs::prelude::*;
-use bevy_ecs::query::QueryData;
-use bevy_ecs::system::SystemParam;
-use glam::Vec3;
-use itertools::Itertools;
+
+mod pipelines;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
