@@ -74,6 +74,9 @@ struct Cell {
 @group(2) @binding(3)
 var<uniform> cell: Cell;
 
+@group(3) @binding(0)
+var depth_texture: texture_depth_2d;
+
 fn cell_index(position: vec3<f32>, cell_size: f32) -> vec3<i32> {
     return vec3<i32>(floor(position / cell_size));
 }
@@ -173,17 +176,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let input = in[in_index];
 
-    let clip = vp.view_proj * vec4(input.position, 1.0);
+    let view = vp.view * vec4(input.position, 1.0);
+    let clip = vp.projection * view;
     let ndc = clip.xyz / clip.w;
 
     if all(abs(ndc.xy) <= vec2(1.0)) && abs(ndc.z - 0.5) <= 0.5 {
+        let uv = vec2<u32>((ndc.xy * vec2(0.5, -0.5) + 0.5) * vec2<f32>(textureDimensions(depth_texture)));
+        let depth = textureLoad(depth_texture, uv, 0);
+       
         let hierarchy = get_hierarchy(input.position);
-        let unpackedColor = unpack4x8(input.color);
+        let radius = metadata.hierarchies[hierarchy].spacing;
+        
+        let moved_clip = vp.projection * vec4(view.xy, view.z + radius, view.w);
+        let moved_ndc = moved_clip.xyz / moved_clip.w;
+        
+        let radius_z = ndc.z - moved_ndc.z;
+       
+        if moved_ndc.z < depth || (moved_ndc.z - depth) < (radius_z * 3.0) {
+            let unpacked_color = unpack4x8(input.color);
 
-        var output = input;
-        output.color = pack4x8(vec4(unpackedColor.xyz, hierarchy));
+            var output = input;
+            output.color = pack4x8(vec4(unpacked_color.xyz, hierarchy));
 
-        let old_index = atomicAdd(&indirect_buffer.instance_count, 1u);
-        out[old_index] = output;
+            let old_index = atomicAdd(&indirect_buffer.instance_count, 1u);
+            out[old_index] = output;
+        }
     }
 }

@@ -44,7 +44,7 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) splat_pos: vec2<f32>,
     @location(2) @interpolate(flat) splat_radius: f32,
-    @location(3) view_pos: vec3<f32>
+    @location(3) view_pos: vec4<f32>
 }
 
 fn get_splat_position(index: u32, radius: f32) -> vec2<f32> {
@@ -76,18 +76,18 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     let cam_right = view_t[0].xyz;
     let cam_up = view_t[1].xyz;
 
-    let unpackedColor = unpack4x8(instance.color);
+    let unpacked_color = unpack4x8(instance.color);
 
-    let hierarchy = unpackedColor.w;
+    let hierarchy = unpacked_color.w;
     let radius = metadata.hierarchies[hierarchy].spacing;
 
     let local_splat_position = get_splat_position(vertex.index, radius);
     let bill_board_offset = cam_right * local_splat_position.x + cam_up * local_splat_position.y;
     let billboard_position = vec4<f32>(instance.position + bill_board_offset, 1.0);
 
-    out.view_pos = (vp.view * billboard_position).xyz;
+    out.view_pos = vp.view * billboard_position;
     out.clip_position = vp.view_proj * billboard_position;
-    out.color = vec4<f32>(vec3<f32>(unpackedColor.xyz) / 255.0, 1.0);
+    out.color = vec4<f32>(vec3<f32>(unpacked_color.xyz) / 255.0, 1.0);
     out.splat_pos = local_splat_position;
     out.splat_radius = radius;
 
@@ -112,7 +112,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     
     let depth_offset = in.splat_radius * weight;
     
-    let pos = vp.projection * vec4(in.view_pos.xy, in.view_pos.z + depth_offset, 1.0);
+    let pos = vp.projection * vec4(in.view_pos.xy, in.view_pos.z + depth_offset, in.view_pos.w);
     let z = pos.z / pos.w;
     
     out.color = vec4<f32>(in.color);

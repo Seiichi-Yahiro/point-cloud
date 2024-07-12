@@ -164,7 +164,7 @@ fn set_view_distance(
 pub struct CellStreamingSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, States)]
-enum StreamState {
+pub enum StreamState {
     Enabled,
     Paused,
 }
@@ -175,7 +175,7 @@ struct VisibleCells {
 }
 
 #[derive(Default, Resource)]
-struct LoadedCells(FxHashMap<CellId, Entity>);
+pub struct LoadedCells(FxHashMap<CellId, Entity>);
 
 #[derive(Resource)]
 struct MissingCells(LRUCache<CellId, (), BuildHasherDefault<FxHasher>>);

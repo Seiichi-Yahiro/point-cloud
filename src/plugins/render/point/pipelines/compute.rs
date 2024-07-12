@@ -1,6 +1,7 @@
 use crate::plugins::render::bind_groups::camera::CameraBindGroupLayout;
 use crate::plugins::render::bind_groups::cell::CellBindGroupLayout;
 use crate::plugins::render::bind_groups::resource::ResourceBindGroupLayout;
+use crate::plugins::render::bind_groups::texture::TextureBindGroupLayout;
 use crate::plugins::wgpu::Device;
 use bevy_ecs::change_detection::Res;
 use bevy_ecs::prelude::{Commands, Resource};
@@ -14,6 +15,7 @@ pub fn create_compute_pipeline(
     camera_bind_group_layout: Res<CameraBindGroupLayout>,
     resource_bind_group_layout: Res<ResourceBindGroupLayout>,
     cell_bind_group_layout: Res<CellBindGroupLayout>,
+    texture_bind_group_layout: Res<TextureBindGroupLayout>,
 ) {
     let compute_shader = device.create_shader_module(wgpu::include_wgsl!("compute.wgsl"));
 
@@ -23,6 +25,7 @@ pub fn create_compute_pipeline(
             &camera_bind_group_layout.0,
             &resource_bind_group_layout.0,
             &cell_bind_group_layout.0,
+            &texture_bind_group_layout.0,
         ],
         push_constant_ranges: &[],
     });

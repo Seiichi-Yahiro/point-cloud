@@ -1,6 +1,9 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+use crate::plugins::render::BufferSet;
+use crate::plugins::winit::{Render, Window, WindowResized};
+use crate::texture::Texture;
 use bevy_app::prelude::*;
 use bevy_app::AppExit;
 use bevy_ecs::prelude::*;
@@ -8,9 +11,6 @@ use bevy_ecs::system::SystemParam;
 use egui::ahash::HashMapExt;
 use rustc_hash::FxHashMap;
 use wgpu::{SurfaceError, TextureFormat};
-
-use crate::plugins::winit::{Render, Window, WindowResized};
-use crate::texture::Texture;
 
 #[derive(Resource)]
 pub struct Device(wgpu::Device);
@@ -120,12 +120,13 @@ impl WGPUPlugin {
         encoders.register::<Self>();
         app.insert_resource(encoders);
 
-        app.add_systems(Startup, setup_depth_texture).add_systems(
-            PreUpdate,
-            (resize_window, update_depth_texture)
-                .chain()
-                .run_if(on_event::<WindowResized>()),
-        );
+        app.add_systems(Startup, setup_depth_texture.in_set(BufferSet))
+            .add_systems(
+                PreUpdate,
+                (resize_window, update_depth_texture.in_set(BufferSet))
+                    .chain()
+                    .run_if(on_event::<WindowResized>()),
+            );
 
         app.configure_sets(Render, RenderPassSet.run_if(resource_exists::<RenderView>));
 
