@@ -1,8 +1,3 @@
-use bevy_app::prelude::*;
-use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemId;
-use glam::Vec3;
-
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::cell::frustums::StreamingFrustums;
@@ -12,6 +7,10 @@ use crate::plugins::render::line::utils::{line_box, line_strip};
 use crate::plugins::render::line::Line;
 use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::wgpu::Device;
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemId;
+use glam::Vec3;
 
 pub struct DebugPlugin;
 

@@ -1,18 +1,24 @@
-use bevy_time::TimePlugin;
-use cfg_if::cfg_if;
-use std::sync::Arc;
-use url::Url;
-
+use crate::plugins::benchmark::BenchmarkPlugin;
 use crate::plugins::camera::CameraPlugin;
 use crate::plugins::cell::CellPlugin;
 use crate::plugins::debug::DebugPlugin;
-use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
 use crate::plugins::metadata::MetadataPlugin;
 use crate::plugins::render::RenderPlugin;
 use crate::plugins::thread_pool::ThreadPoolPlugin;
 use crate::plugins::wgpu::WGPUPlugin;
 use crate::plugins::winit::{Window, WinitPlugin};
+use crate::transform::Transform;
+use bevy_app::Update;
+use bevy_core::FrameCountPlugin;
+use bevy_diagnostic::{
+    DiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
+};
+use bevy_easings::{custom_ease_system, EasingsPlugin};
+use bevy_time::TimePlugin;
+use cfg_if::cfg_if;
+use std::sync::Arc;
+use url::Url;
 
 pub struct App {
     pub canvas_id: Option<String>,
@@ -32,7 +38,15 @@ impl App {
         )
         .await;
 
-        app.add_plugins((TimePlugin, InputPlugin, CameraPlugin, FPSPlugin))
+        app.add_plugins((TimePlugin, EasingsPlugin))
+            .add_plugins((
+                FrameCountPlugin,
+                DiagnosticsPlugin,
+                FrameTimeDiagnosticsPlugin,
+                SystemInformationDiagnosticsPlugin,
+            ))
+            .add_plugins((InputPlugin, CameraPlugin))
+            .add_systems(Update, custom_ease_system::<Transform>)
             .add_plugins((
                 ThreadPoolPlugin,
                 MetadataPlugin { url: self.url },
@@ -40,6 +54,7 @@ impl App {
                 #[cfg(not(target_arch = "wasm32"))]
                 crate::plugins::converter::ConverterPlugin,
                 DebugPlugin,
+                BenchmarkPlugin,
                 RenderPlugin,
             ))
             .run();

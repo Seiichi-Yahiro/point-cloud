@@ -1,4 +1,7 @@
 use bevy_app::prelude::*;
+use bevy_diagnostic::{
+    DiagnosticsStore, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
+};
 use bevy_ecs::prelude::*;
 use egui::epaint::Shadow;
 use egui::{Context, Visuals};
@@ -98,7 +101,25 @@ fn ui(world: &mut World) {
             .default_width(150.0)
             .show_animated(&context, side_panel_opened.0, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    crate::plugins::fps::draw_ui(ui, world);
+                    {
+                        let diagnostics = world.get_resource::<DiagnosticsStore>().unwrap();
+
+                        let fps = diagnostics
+                            .get(&FrameTimeDiagnosticsPlugin::FPS)
+                            .and_then(|fps| fps.smoothed());
+
+                        if let Some(fps) = fps {
+                            ui.label(format!("FPS: {:>4.0}", fps));
+                        }
+
+                        let cpu = diagnostics
+                            .get(&SystemInformationDiagnosticsPlugin::CPU_USAGE)
+                            .and_then(|cpu| cpu.smoothed());
+
+                        if let Some(cpu) = cpu {
+                            ui.label(format!("CPU: {:>2.0} %", cpu));
+                        }
+                    }
 
                     egui::CollapsingHeader::new("Metadata")
                         .default_open(true)
@@ -123,6 +144,10 @@ fn ui(world: &mut World) {
 
                     ui.collapsing("Debug", |ui| {
                         crate::plugins::debug::draw_ui(ui, world);
+                    });
+
+                    ui.collapsing("Benchmark", |ui| {
+                        crate::plugins::benchmark::draw_ui(ui, world);
                     });
                 });
             });

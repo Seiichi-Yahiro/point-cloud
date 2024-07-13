@@ -1,13 +1,25 @@
-use std::ops::Mul;
-
+use bevy_easings::{EaseValue, Lerp};
 use bevy_ecs::prelude::Component;
 use glam::{Mat3, Mat4, Quat, Vec3};
+use std::ops::Mul;
 
 #[derive(Debug, PartialEq, Copy, Clone, Component)]
 pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,
     pub scale: Vec3,
+}
+
+impl Lerp for Transform {
+    type Scalar = f32;
+
+    fn lerp(&self, other: &Self, scalar: &Self::Scalar) -> Self {
+        Transform {
+            translation: self.translation.lerp(other.translation, *scalar),
+            scale: self.scale.lerp(other.scale, *scalar),
+            rotation: self.rotation.lerp(other.rotation, *scalar),
+        }
+    }
 }
 
 impl Default for Transform {

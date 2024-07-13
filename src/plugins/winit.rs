@@ -76,7 +76,7 @@ impl Plugin for WinitPlugin {
                     .with_append(true);
 
             } else {
-                window_builder = window_builder.with_inner_size(PhysicalSize::new(1280, 720));
+                window_builder = window_builder.with_inner_size(PhysicalSize::new(1920, 1080));
             }
         }
 
