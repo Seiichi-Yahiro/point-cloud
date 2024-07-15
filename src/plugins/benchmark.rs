@@ -71,8 +71,7 @@ fn save(benchmark: &Benchmark) -> std::io::Result<()> {
     let fps = benchmark
         .0
         .iter()
-        .enumerate()
-        .map(|(i, data)| format!("({i}, {:.0})", data.fps))
+        .map(|data| format!("{:.0}", data.fps))
         .join(",");
 
     buf.write_all(fps.as_bytes())?;
@@ -82,8 +81,7 @@ fn save(benchmark: &Benchmark) -> std::io::Result<()> {
     let cpu = benchmark
         .0
         .iter()
-        .enumerate()
-        .map(|(i, data)| format!("({i}, {:.0})", data.cpu))
+        .map(|data| format!("{:.0}", data.cpu))
         .join(",");
 
     buf.write_all(cpu.as_bytes())?;
