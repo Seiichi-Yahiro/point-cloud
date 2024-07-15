@@ -396,8 +396,8 @@ fn update_cells(
             for cell_id in not_visible_anymore_cells {
                 if let Some(entity) = loaded_cells.0.remove(&cell_id) {
                     commands.entity(entity).despawn();
-                } else {
-                    loading_cells.should_load.remove(&cell_id);
+                } else if loading_cells.should_load.remove(&cell_id).is_none() {
+                    loading_cells.loading.remove(&cell_id);
                 }
             }
 
