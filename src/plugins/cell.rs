@@ -175,7 +175,7 @@ struct VisibleCells {
 }
 
 #[derive(Default, Resource)]
-struct LoadedCells(FxHashMap<CellId, Entity>);
+pub struct LoadedCells(pub FxHashMap<CellId, Entity>);
 
 #[derive(Resource)]
 struct MissingCells(LRUCache<CellId, (), BuildHasherDefault<FxHasher>>);
@@ -187,15 +187,15 @@ impl Default for MissingCells {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct CellSortValue {
+pub struct CellSortValue {
     hierarchy: u32,
     distance_to_camera: u32,
 }
 
 #[derive(Resource)]
-struct LoadingCells {
-    should_load: SortedHashMap<CellId, CellSortValue, ()>,
-    loading: FxHashSet<CellId>,
+pub struct LoadingCells {
+    pub should_load: SortedHashMap<CellId, CellSortValue, ()>,
+    pub loading: FxHashSet<CellId>,
 }
 
 impl LoadingCells {
@@ -460,10 +460,10 @@ fn enqueue_cells_to_load(
     }
 }
 
-#[derive(Default, Resource)]
-struct Stats {
-    loaded_points: u64,
-    loaded_points_byte_size: u64,
+#[derive(Debug, Default, Copy, Clone, Resource)]
+pub struct Stats {
+    pub loaded_points: u64,
+    pub loaded_points_byte_size: u64,
 }
 
 fn count_points(cell_header_query: Query<&CellHeader>, mut stats: ResMut<Stats>) {

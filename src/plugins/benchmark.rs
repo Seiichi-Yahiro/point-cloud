@@ -1,6 +1,7 @@
 mod usc;
 
 use crate::plugins::camera::Camera;
+use crate::plugins::cell::{LoadedCells, LoadingCells};
 use crate::transform::Transform;
 use bevy_app::prelude::*;
 use bevy_diagnostic::{
@@ -49,6 +50,10 @@ struct Benchmark(Vec<BenchmarkData>);
 struct BenchmarkData {
     fps: f64,
     cpu: f64,
+    loaded_points: u64,
+    loaded_cells: u32,
+    should_load: u32,
+    loading_cells: u32,
 }
 
 fn save(benchmark: &Benchmark) -> std::io::Result<()> {
@@ -74,9 +79,9 @@ fn save(benchmark: &Benchmark) -> std::io::Result<()> {
         .map(|data| format!("{:.0}", data.fps))
         .join(",");
 
+    buf.write_all(b"fps:(")?;
     buf.write_all(fps.as_bytes())?;
-
-    buf.write_all(b"\n")?;
+    buf.write_all(b"),\n")?;
 
     let cpu = benchmark
         .0
@@ -84,7 +89,49 @@ fn save(benchmark: &Benchmark) -> std::io::Result<()> {
         .map(|data| format!("{:.0}", data.cpu))
         .join(",");
 
+    buf.write_all(b"cpu:(")?;
     buf.write_all(cpu.as_bytes())?;
+    buf.write_all(b"),\n")?;
+
+    let loaded_points = benchmark
+        .0
+        .iter()
+        .map(|data| format!("{}", data.loaded_points))
+        .join(",");
+
+    buf.write_all(b"loaded_points:(")?;
+    buf.write_all(loaded_points.as_bytes())?;
+    buf.write_all(b"),\n")?;
+
+    let loaded_cells = benchmark
+        .0
+        .iter()
+        .map(|data| format!("{}", data.loaded_cells))
+        .join(",");
+
+    buf.write_all(b"loaded_cells:(")?;
+    buf.write_all(loaded_cells.as_bytes())?;
+    buf.write_all(b"),\n")?;
+
+    let loading_cells = benchmark
+        .0
+        .iter()
+        .map(|data| format!("{}", data.loading_cells))
+        .join(",");
+
+    buf.write_all(b"loading_cells:(")?;
+    buf.write_all(loading_cells.as_bytes())?;
+    buf.write_all(b"),\n")?;
+
+    let should_load = benchmark
+        .0
+        .iter()
+        .map(|data| format!("{}", data.should_load))
+        .join(",");
+
+    buf.write_all(b"should_load:(")?;
+    buf.write_all(should_load.as_bytes())?;
+    buf.write_all(b"),\n")?;
 
     Ok(())
 }
@@ -128,7 +175,13 @@ fn prepare_benchmark(
     commands.entity(entity).insert(ease);
 }
 
-fn measure(diagnostics: Res<DiagnosticsStore>, mut benchmark: ResMut<Benchmark>) {
+fn measure(
+    diagnostics: Res<DiagnosticsStore>,
+    mut benchmark: ResMut<Benchmark>,
+    cell_stats: Res<crate::plugins::cell::Stats>,
+    loaded_cells: Res<LoadedCells>,
+    loading_cells: Res<LoadingCells>,
+) {
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|fps| fps.smoothed())
@@ -139,7 +192,14 @@ fn measure(diagnostics: Res<DiagnosticsStore>, mut benchmark: ResMut<Benchmark>)
         .and_then(|cpu| cpu.smoothed())
         .unwrap_or(0.0);
 
-    benchmark.0.push(BenchmarkData { fps, cpu });
+    benchmark.0.push(BenchmarkData {
+        fps,
+        cpu,
+        loaded_points: cell_stats.loaded_points,
+        loaded_cells: loaded_cells.0.len() as u32,
+        loading_cells: loading_cells.loading.len() as u32,
+        should_load: loading_cells.should_load.len() as u32,
+    });
 }
 
 fn check_if_finished(
