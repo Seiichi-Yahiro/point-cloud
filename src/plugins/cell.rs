@@ -175,7 +175,7 @@ struct VisibleCells {
 }
 
 #[derive(Default, Resource)]
-pub struct LoadedCells(FxHashMap<CellId, Entity>);
+struct LoadedCells(FxHashMap<CellId, Entity>);
 
 #[derive(Resource)]
 struct MissingCells(LRUCache<CellId, (), BuildHasherDefault<FxHasher>>);

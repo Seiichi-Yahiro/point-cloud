@@ -5,12 +5,11 @@ use bevy_ecs::system::SystemParam;
 use glam::Vec3;
 use itertools::Itertools;
 
-use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::{Camera, Visibility};
 use crate::plugins::cell::shader::{
     CellIndirectBuffer, CellInputVertexBuffer, CellOutputVertexBuffer,
 };
-use crate::plugins::cell::{CellHeader, LoadedCells, StreamState};
+use crate::plugins::cell::{CellHeader, StreamState};
 use crate::plugins::render::bind_groups::camera::CameraBindGroup;
 use crate::plugins::render::bind_groups::cell::CellBindGroup;
 use crate::plugins::render::bind_groups::resource::ResourceBindGroup;
@@ -117,15 +116,14 @@ struct RenderResources<'w> {
 fn draw(
     mut global_render_resources: GlobalRenderResources,
     render_resources: RenderResources,
-    camera_query: Query<(&CameraBindGroup, &Transform, Ref<Frustum>), With<Camera>>,
+    camera_query: Query<(&CameraBindGroup, &Transform), With<Camera>>,
     cell_query: Query<CellQueryData>,
     stream_state: Res<State<StreamState>>,
-    loaded_cells: Res<LoadedCells>,
 ) {
     global_render_resources
         .encoders
         .encode::<PointRenderPlugin>(|encoder| {
-            for (camera_bind_group, camera_transform, frustum) in camera_query.iter() {
+            for (camera_bind_group, camera_transform) in camera_query.iter() {
                 let cell_groups = cell_query
                     .iter()
                     .filter(|cell| cell.visibility.visible)
@@ -138,8 +136,7 @@ fn draw(
                     .sorted_unstable_by_key(|(distance, _)| *distance)
                     .group_by(|(distance, _)| distance.checked_ilog2().unwrap_or(0));
 
-                let filter_occluded_points = (frustum.is_changed() || loaded_cells.is_changed())
-                    && *stream_state == StreamState::Enabled;
+                let filter_occluded_points = *stream_state == StreamState::Enabled;
 
                 for (_, group) in &cell_groups {
                     let cells = group.map(|(_, cell)| cell).collect_vec();
