@@ -1,6 +1,7 @@
 use crate::plugins::cell::shader::{
     CellIdBuffer, CellIndirectBuffer, CellInputVertexBuffer, CellOutputVertexBuffer,
 };
+use crate::plugins::cell::CellHeader;
 use crate::plugins::wgpu::Device;
 use bevy_ecs::prelude::*;
 
@@ -9,7 +10,7 @@ pub struct CellBindGroupLayout(pub wgpu::BindGroupLayout);
 
 pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("point-draw-bind-group-layout"),
+        label: Some("point-cell-bind-group-layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0, // point-input-vertex-buffer
@@ -70,7 +71,7 @@ impl CellBindGroup {
         id: &CellIdBuffer,
     ) -> Self {
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("point-draw-bind_group"),
+            label: Some("point-cell-bind-group"),
             layout: &layout.0,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -103,6 +104,7 @@ pub fn create_bind_group(
     query: Query<
         (
             Entity,
+            &CellHeader,
             &CellInputVertexBuffer,
             &CellOutputVertexBuffer,
             &CellIndirectBuffer,
@@ -111,7 +113,10 @@ pub fn create_bind_group(
         Without<CellBindGroup>,
     >,
 ) {
-    for (entity, input, output, indirect, id) in query.iter() {
+    for (entity, header, input, output, indirect, id) in query.iter() {
+        if header.0.total_number_of_points == 0 {
+            continue;
+        }
         let group = CellBindGroup::new(&device, &layout, input, output, indirect, id);
         commands.entity(entity).insert(group);
     }

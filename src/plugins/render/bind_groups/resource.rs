@@ -8,7 +8,7 @@ pub struct ResourceBindGroupLayout(pub wgpu::BindGroupLayout);
 
 pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("point-frame-bind-group-layout"),
+        label: Some("point-resource-bind-group-layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0, // metadata
@@ -77,7 +77,7 @@ pub fn create_bind_group(
     }
 
     let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("point-frame-bind-group"),
+        label: Some("point-resource-bind-group"),
         layout: &layout.0,
         entries: &[
             wgpu::BindGroupEntry {
