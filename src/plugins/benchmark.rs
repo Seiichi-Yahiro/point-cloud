@@ -57,21 +57,29 @@ struct BenchmarkData {
 }
 
 fn save(benchmark: &Benchmark) -> std::io::Result<()> {
-    let dir = std::env::current_dir()?.join("benchmarks");
-    if let Err(err) = create_dir(&dir) {
-        match err.kind() {
-            ErrorKind::AlreadyExists => {}
-            _ => return Err(err),
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut buf = {
+        let dir = std::env::current_dir()?.join("benchmarks");
+        if let Err(err) = create_dir(&dir) {
+            match err.kind() {
+                ErrorKind::AlreadyExists => {}
+                _ => return Err(err),
+            }
         }
-    }
 
-    let time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap();
-    let file_path = dir.join(time.as_secs().to_string()).with_extension("txt");
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
 
-    let file = File::create(file_path)?;
-    let mut buf = BufWriter::new(file);
+        let file_path = dir.join(time.as_secs().to_string()).with_extension("txt");
+
+        let file = File::create(file_path)?;
+
+        BufWriter::new(file)
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let mut buf = Vec::new();
 
     let fps = benchmark
         .0
@@ -132,6 +140,16 @@ fn save(benchmark: &Benchmark) -> std::io::Result<()> {
     buf.write_all(b"should_load:(")?;
     buf.write_all(should_load.as_bytes())?;
     buf.write_all(b"),\n")?;
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let data = std::str::from_utf8(&buf).unwrap().to_string();
+        let req = ehttp::Request::post("https://192.168.178.89:3000/log", buf);
+        ehttp::fetch(req, |res| {
+            log::debug!("{:?}", res);
+        });
+        log::info!("{}", data);
+    }
 
     Ok(())
 }
