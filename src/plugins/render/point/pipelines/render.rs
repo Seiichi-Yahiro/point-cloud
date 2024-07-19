@@ -1,13 +1,13 @@
 use crate::plugins::render::bind_groups::camera::CameraBindGroupLayout;
 use crate::plugins::render::bind_groups::resource::ResourceBindGroupLayout;
 use crate::plugins::render::point::Point;
-use crate::plugins::wgpu::{Device, SurfaceConfig};
+use crate::plugins::wgpu::{Device, SurfaceConfig, WgpuWrapper};
 use crate::texture::Texture;
 use bevy_ecs::change_detection::Res;
 use bevy_ecs::prelude::{Commands, Resource};
 
 #[derive(Resource)]
-pub struct PointRenderPipeline(pub wgpu::RenderPipeline);
+pub struct PointRenderPipeline(pub WgpuWrapper<wgpu::RenderPipeline>);
 
 pub fn create_render_pipeline(
     mut commands: Commands,
@@ -65,5 +65,5 @@ pub fn create_render_pipeline(
         multiview: None,
     });
 
-    commands.insert_resource(PointRenderPipeline(pipeline));
+    commands.insert_resource(PointRenderPipeline(WgpuWrapper(pipeline)));
 }

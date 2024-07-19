@@ -2,11 +2,11 @@ use crate::plugins::cell::shader::{
     CellIdBuffer, CellIndirectBuffer, CellInputVertexBuffer, CellOutputVertexBuffer,
 };
 use crate::plugins::cell::CellHeader;
-use crate::plugins::wgpu::Device;
+use crate::plugins::wgpu::{Device, WgpuWrapper};
 use bevy_ecs::prelude::*;
 
 #[derive(Resource)]
-pub struct CellBindGroupLayout(pub wgpu::BindGroupLayout);
+pub struct CellBindGroupLayout(pub WgpuWrapper<wgpu::BindGroupLayout>);
 
 pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -55,11 +55,11 @@ pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
         ],
     });
 
-    commands.insert_resource(CellBindGroupLayout(layout));
+    commands.insert_resource(CellBindGroupLayout(WgpuWrapper(layout)));
 }
 
 #[derive(Component)]
-pub struct CellBindGroup(pub wgpu::BindGroup);
+pub struct CellBindGroup(pub WgpuWrapper<wgpu::BindGroup>);
 
 impl CellBindGroup {
     fn new(
@@ -93,7 +93,7 @@ impl CellBindGroup {
             ],
         });
 
-        Self(group)
+        Self(WgpuWrapper(group))
     }
 }
 

@@ -18,7 +18,7 @@ crate-type = ["cdylib", "rlib"]
 members = ["bounding-volume", "point-converter", "thread-pool"]
 
 [dependencies]
-wgpu = "0.19.3"
+wgpu = { version = "0.19.3", features = ["default", "fragile-send-sync-non-atomic-wasm"] }
 winit = "0.29.15"
 web-time = "1.1.0"
 egui = "0.27.0"

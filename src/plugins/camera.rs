@@ -7,7 +7,7 @@ use crate::plugins::camera::fly_cam::{FlyCamController, FlyCamPlugin};
 use crate::plugins::camera::frustum::Frustum;
 use crate::plugins::camera::projection::PerspectiveProjection;
 use crate::plugins::render::BufferSet;
-use crate::plugins::wgpu::{Device, Queue, SurfaceConfig};
+use crate::plugins::wgpu::{Device, Queue, SurfaceConfig, WgpuWrapper};
 use crate::plugins::winit::WindowResized;
 use crate::transform::Transform;
 
@@ -47,7 +47,7 @@ pub struct CameraControlSet;
 pub struct UpdateFrustum;
 
 #[derive(Component)]
-pub struct ViewProjectionBuffer(pub wgpu::Buffer);
+pub struct ViewProjectionBuffer(pub WgpuWrapper<wgpu::Buffer>);
 
 impl ViewProjectionBuffer {
     fn new(
@@ -71,12 +71,12 @@ impl ViewProjectionBuffer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        Self(buffer)
+        Self(WgpuWrapper(buffer))
     }
 }
 
 #[derive(Component)]
-pub struct ViewportBuffer(pub wgpu::Buffer);
+pub struct ViewportBuffer(pub WgpuWrapper<wgpu::Buffer>);
 
 impl ViewportBuffer {
     fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
@@ -86,7 +86,7 @@ impl ViewportBuffer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        Self(buffer)
+        Self(WgpuWrapper(buffer))
     }
 }
 

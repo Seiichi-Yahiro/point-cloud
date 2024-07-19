@@ -10,7 +10,7 @@ use crate::plugins::cell::frustums::StreamingFrustums;
 use crate::plugins::cell::CellHeader;
 use crate::plugins::metadata::ActiveMetadata;
 use crate::plugins::render::point::Point;
-use crate::plugins::wgpu::{Device, Queue};
+use crate::plugins::wgpu::{Device, Queue, WgpuWrapper};
 use crate::transform::Transform;
 
 #[repr(C)]
@@ -49,7 +49,7 @@ impl CellBufferBundle {
 
 #[derive(Component)]
 pub struct CellInputVertexBuffer {
-    pub buffer: wgpu::Buffer,
+    pub buffer: WgpuWrapper<wgpu::Buffer>,
     len: u32,
 }
 
@@ -62,7 +62,7 @@ impl CellInputVertexBuffer {
         });
 
         Self {
-            buffer,
+            buffer: WgpuWrapper(buffer),
             len: points.len() as u32,
         }
     }
@@ -73,7 +73,7 @@ impl CellInputVertexBuffer {
 }
 
 #[derive(Component)]
-pub struct CellOutputVertexBuffer(pub wgpu::Buffer);
+pub struct CellOutputVertexBuffer(pub WgpuWrapper<wgpu::Buffer>);
 
 impl CellOutputVertexBuffer {
     pub fn new(device: &wgpu::Device, number_of_points: usize) -> Self {
@@ -84,12 +84,12 @@ impl CellOutputVertexBuffer {
             mapped_at_creation: false,
         });
 
-        Self(buffer)
+        Self(WgpuWrapper(buffer))
     }
 }
 
 #[derive(Component)]
-pub struct CellIndirectBuffer(pub wgpu::Buffer);
+pub struct CellIndirectBuffer(pub WgpuWrapper<wgpu::Buffer>);
 
 impl CellIndirectBuffer {
     pub fn new(device: &wgpu::Device) -> Self {
@@ -107,12 +107,12 @@ impl CellIndirectBuffer {
                 | wgpu::BufferUsages::COPY_DST,
         });
 
-        Self(buffer)
+        Self(WgpuWrapper(buffer))
     }
 }
 
 #[derive(Component)]
-pub struct CellIdBuffer(pub wgpu::Buffer);
+pub struct CellIdBuffer(pub WgpuWrapper<wgpu::Buffer>);
 
 impl CellIdBuffer {
     pub fn new(device: &wgpu::Device, cell_id: CellId) -> Self {
@@ -127,13 +127,13 @@ impl CellIdBuffer {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        Self(buffer)
+        Self(WgpuWrapper(buffer))
     }
 }
 
 #[derive(Resource)]
 pub struct LoadedCellsBuffer {
-    pub buffer: wgpu::Buffer,
+    pub buffer: WgpuWrapper<wgpu::Buffer>,
     pub capacity: usize,
 }
 
@@ -147,13 +147,16 @@ impl LoadedCellsBuffer {
             mapped_at_creation: false,
         });
 
-        Self { buffer, capacity }
+        Self {
+            buffer: WgpuWrapper(buffer),
+            capacity,
+        }
     }
 }
 
 #[derive(Resource)]
 pub struct FrustumsBuffer {
-    pub buffer: wgpu::Buffer,
+    pub buffer: WgpuWrapper<wgpu::Buffer>,
     pub capacity: usize,
 }
 
@@ -166,7 +169,10 @@ impl FrustumsBuffer {
             mapped_at_creation: false,
         });
 
-        Self { buffer, capacity }
+        Self {
+            buffer: WgpuWrapper(buffer),
+            capacity,
+        }
     }
 }
 
@@ -174,7 +180,7 @@ impl FrustumsBuffer {
 pub struct FrustumsSettings {
     pub size_by_distance: bool,
     pub max_hierarchy: u32,
-    pub buffer: wgpu::Buffer,
+    pub buffer: WgpuWrapper<wgpu::Buffer>,
 }
 
 impl FrustumsSettings {
@@ -189,7 +195,7 @@ impl FrustumsSettings {
         Self {
             size_by_distance: true,
             max_hierarchy: 0,
-            buffer,
+            buffer: WgpuWrapper(buffer),
         }
     }
 }

@@ -1,9 +1,9 @@
 use crate::plugins::camera::{ViewProjectionBuffer, ViewportBuffer};
-use crate::plugins::wgpu::Device;
+use crate::plugins::wgpu::{Device, WgpuWrapper};
 use bevy_ecs::prelude::*;
 
 #[derive(Resource)]
-pub struct CameraBindGroupLayout(pub wgpu::BindGroupLayout);
+pub struct CameraBindGroupLayout(pub WgpuWrapper<wgpu::BindGroupLayout>);
 
 pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -32,11 +32,11 @@ pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
         ],
     });
 
-    commands.insert_resource(CameraBindGroupLayout(layout));
+    commands.insert_resource(CameraBindGroupLayout(WgpuWrapper(layout)));
 }
 
 #[derive(Component)]
-pub struct CameraBindGroup(pub wgpu::BindGroup);
+pub struct CameraBindGroup(pub WgpuWrapper<wgpu::BindGroup>);
 
 impl CameraBindGroup {
     fn new(
@@ -60,7 +60,7 @@ impl CameraBindGroup {
             ],
         });
 
-        Self(group)
+        Self(WgpuWrapper(group))
     }
 }
 

@@ -1,8 +1,8 @@
-use crate::plugins::wgpu::{Device, GlobalDepthTexture};
+use crate::plugins::wgpu::{Device, GlobalDepthTexture, WgpuWrapper};
 use bevy_ecs::prelude::*;
 
 #[derive(Resource)]
-pub struct TextureBindGroupLayout(pub wgpu::BindGroupLayout);
+pub struct TextureBindGroupLayout(pub WgpuWrapper<wgpu::BindGroupLayout>);
 
 pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -19,11 +19,11 @@ pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
         }],
     });
 
-    commands.insert_resource(TextureBindGroupLayout(layout));
+    commands.insert_resource(TextureBindGroupLayout(WgpuWrapper(layout)));
 }
 
 #[derive(Resource)]
-pub struct TextureBindGroup(pub wgpu::BindGroup);
+pub struct TextureBindGroup(pub WgpuWrapper<wgpu::BindGroup>);
 
 pub fn create_bind_group(
     mut commands: Commands,
@@ -44,5 +44,5 @@ pub fn create_bind_group(
         }],
     });
 
-    commands.insert_resource(TextureBindGroup(group));
+    commands.insert_resource(TextureBindGroup(WgpuWrapper(group)));
 }

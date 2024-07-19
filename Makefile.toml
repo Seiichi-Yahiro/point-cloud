@@ -27,8 +27,9 @@ args = [
 ]
 
 [tasks.web]
-env = { "RUSTFLAGS" = "--cfg=web_sys_unstable_apis" }
+env = { "RUSTFLAGS" = "-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--max-memory=4294967296 --cfg=web_sys_unstable_apis" }
 command = "wasm-pack"
+toolchain = "nightly"
 install_crate = { crate_name = "wasm-pack", binary = "wasm-pack", test_arg = "--help" }
 args = [
     "build",
@@ -36,4 +37,6 @@ args = [
     "--weak-refs",
     "--release",
     ".",
+    "--",
+    "-Z", "build-std=std,panic_abort"
 ]

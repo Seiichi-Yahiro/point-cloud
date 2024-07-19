@@ -7,6 +7,7 @@ use egui_winit::State;
 
 use crate::plugins::wgpu::{
     CommandEncoders, Device, GlobalRenderResources, Queue, Render, RenderPassSet, SurfaceConfig,
+    WgpuWrapper,
 };
 use crate::plugins::winit::{Window, WindowEvent};
 
@@ -30,7 +31,7 @@ impl Plugin for UiPlugin {
 struct Egui {
     pub context: Context,
     state: State,
-    renderer: Renderer,
+    renderer: WgpuWrapper<Renderer>,
 }
 fn setup(
     mut commands: Commands,
@@ -64,7 +65,7 @@ fn setup(
     commands.insert_resource(Egui {
         context: egui_context,
         state: egui_state,
-        renderer: egui_renderer,
+        renderer: WgpuWrapper(egui_renderer),
     });
 }
 

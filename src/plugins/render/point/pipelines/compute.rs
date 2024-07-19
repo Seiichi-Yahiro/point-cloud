@@ -2,12 +2,12 @@ use crate::plugins::render::bind_groups::camera::CameraBindGroupLayout;
 use crate::plugins::render::bind_groups::cell::CellBindGroupLayout;
 use crate::plugins::render::bind_groups::resource::ResourceBindGroupLayout;
 use crate::plugins::render::bind_groups::texture::TextureBindGroupLayout;
-use crate::plugins::wgpu::Device;
+use crate::plugins::wgpu::{Device, WgpuWrapper};
 use bevy_ecs::change_detection::Res;
 use bevy_ecs::prelude::{Commands, Resource};
 
 #[derive(Resource)]
-pub struct PointComputePipeLine(pub wgpu::ComputePipeline);
+pub struct PointComputePipeLine(pub WgpuWrapper<wgpu::ComputePipeline>);
 
 pub fn create_compute_pipeline(
     mut commands: Commands,
@@ -37,5 +37,5 @@ pub fn create_compute_pipeline(
         entry_point: "main",
     });
 
-    commands.insert_resource(PointComputePipeLine(pipeline));
+    commands.insert_resource(PointComputePipeLine(WgpuWrapper(pipeline)));
 }

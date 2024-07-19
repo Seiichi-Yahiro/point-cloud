@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use itertools::Itertools;
 
 use crate::plugins::metadata::ActiveMetadata;
-use crate::plugins::wgpu::{Device, Queue};
+use crate::plugins::wgpu::{Device, Queue, WgpuWrapper};
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -13,7 +13,7 @@ struct Hierarchy {
 
 #[derive(Resource)]
 pub struct MetadataBuffer {
-    pub buffer: wgpu::Buffer,
+    pub buffer: WgpuWrapper<wgpu::Buffer>,
     capacity: usize,
 }
 
@@ -27,7 +27,10 @@ impl MetadataBuffer {
             mapped_at_creation: false,
         });
 
-        Self { buffer, capacity }
+        Self {
+            buffer: WgpuWrapper(buffer),
+            capacity,
+        }
     }
 }
 

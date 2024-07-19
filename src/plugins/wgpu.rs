@@ -13,8 +13,31 @@ use egui::ahash::HashMapExt;
 use rustc_hash::FxHashMap;
 use wgpu::{SurfaceError, TextureFormat};
 
+#[derive(Debug)]
+pub struct WgpuWrapper<T>(pub T);
+
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+unsafe impl<T> Send for WgpuWrapper<T> {}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+unsafe impl<T> Sync for WgpuWrapper<T> {}
+
+impl<T> Deref for WgpuWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for WgpuWrapper<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Resource)]
-pub struct Device(wgpu::Device);
+pub struct Device(WgpuWrapper<wgpu::Device>);
 
 impl Deref for Device {
     type Target = wgpu::Device;
@@ -25,7 +48,7 @@ impl Deref for Device {
 }
 
 #[derive(Resource)]
-pub struct Queue(wgpu::Queue);
+pub struct Queue(WgpuWrapper<wgpu::Queue>);
 
 impl Deref for Queue {
     type Target = wgpu::Queue;
@@ -36,7 +59,7 @@ impl Deref for Queue {
 }
 
 #[derive(Resource)]
-pub struct Surface(wgpu::Surface<'static>);
+pub struct Surface(WgpuWrapper<wgpu::Surface<'static>>);
 
 impl Deref for Surface {
     type Target = wgpu::Surface<'static>;
@@ -47,7 +70,7 @@ impl Deref for Surface {
 }
 
 #[derive(Resource)]
-pub struct SurfaceConfig(wgpu::SurfaceConfiguration);
+pub struct SurfaceConfig(WgpuWrapper<wgpu::SurfaceConfiguration>);
 
 impl Deref for SurfaceConfig {
     type Target = wgpu::SurfaceConfiguration;
@@ -112,10 +135,10 @@ impl WGPUPlugin {
 
         surface.configure(&device, &config);
 
-        app.insert_resource(Device(device));
-        app.insert_resource(Queue(queue));
-        app.insert_resource(Surface(surface));
-        app.insert_resource(SurfaceConfig(config));
+        app.insert_resource(Device(WgpuWrapper(device)));
+        app.insert_resource(Queue(WgpuWrapper(queue)));
+        app.insert_resource(Surface(WgpuWrapper(surface)));
+        app.insert_resource(SurfaceConfig(WgpuWrapper(config)));
 
         let mut encoders = CommandEncoders::new();
         encoders.register::<Self>();
@@ -169,11 +192,11 @@ fn resize_window(
 }
 
 #[derive(Resource)]
-pub struct GlobalDepthTexture(Texture);
+pub struct GlobalDepthTexture(WgpuWrapper<Texture>);
 
 impl GlobalDepthTexture {
     pub fn new(texture: Texture) -> Self {
-        Self(texture)
+        Self(WgpuWrapper(texture))
     }
 }
 
@@ -208,7 +231,7 @@ fn update_depth_texture(
 #[derive(Debug, Resource)]
 pub struct CommandEncoders {
     order: Vec<&'static str>,
-    encoders: FxHashMap<&'static str, wgpu::CommandEncoder>,
+    encoders: FxHashMap<&'static str, WgpuWrapper<wgpu::CommandEncoder>>,
 }
 
 impl CommandEncoders {
@@ -234,7 +257,11 @@ impl CommandEncoders {
         for id in &self.order {
             self.encoders.insert(
                 id,
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(id) }),
+                WgpuWrapper(
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(id),
+                    }),
+                ),
             );
         }
     }
@@ -243,7 +270,7 @@ impl CommandEncoders {
         let mut buffers = Vec::with_capacity(self.order.len());
 
         for id in &self.order {
-            let encoder = self.encoders.remove(id).unwrap();
+            let encoder = self.encoders.remove(id).unwrap().0;
             buffers.push(encoder.finish());
         }
 
@@ -253,8 +280,8 @@ impl CommandEncoders {
 
 #[derive(Resource)]
 pub struct RenderView {
-    frame: wgpu::SurfaceTexture,
-    pub view: wgpu::TextureView,
+    frame: WgpuWrapper<wgpu::SurfaceTexture>,
+    pub view: WgpuWrapper<wgpu::TextureView>,
 }
 fn begin_frame(
     mut commands: Commands,
@@ -293,7 +320,10 @@ fn begin_frame(
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
 
-    commands.insert_resource(RenderView { frame, view });
+    commands.insert_resource(RenderView {
+        frame: WgpuWrapper(frame),
+        view: WgpuWrapper(view),
+    });
 
     encoders.prepare(&device);
 }
@@ -340,7 +370,7 @@ fn end_frame(world: &mut World) {
 
         world.get_resource::<Queue>().unwrap().submit(buffers);
 
-        render_view.frame.present();
+        render_view.frame.0.present();
     } else {
         world.get_resource::<Queue>().unwrap().submit(None);
     }

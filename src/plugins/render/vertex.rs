@@ -1,9 +1,10 @@
+use crate::plugins::wgpu::WgpuWrapper;
 use bevy_ecs::prelude::Component;
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Component)]
 pub struct VertexBuffer<T> {
-    pub buffer: wgpu::Buffer,
+    pub buffer: WgpuWrapper<wgpu::Buffer>,
     len: u32,
     _phantom: std::marker::PhantomData<T>,
 }
@@ -17,7 +18,7 @@ impl<T: bytemuck::NoUninit> VertexBuffer<T> {
         });
 
         Self {
-            buffer,
+            buffer: WgpuWrapper(buffer),
             len: vertices.len() as u32,
             _phantom: std::marker::PhantomData,
         }

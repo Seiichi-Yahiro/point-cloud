@@ -8,6 +8,7 @@ use crate::plugins::render::vertex::VertexBuffer;
 use crate::plugins::render::PipelineSet;
 use crate::plugins::wgpu::{
     CommandEncoders, Device, GlobalRenderResources, Render, RenderPassSet, SurfaceConfig,
+    WgpuWrapper,
 };
 use crate::texture::Texture;
 
@@ -50,7 +51,7 @@ impl Plugin for LineRenderPlugin {
 
 #[derive(Resource)]
 struct RenderResources {
-    pipeline: wgpu::RenderPipeline,
+    pipeline: WgpuWrapper<wgpu::RenderPipeline>,
 }
 
 fn setup(
@@ -108,7 +109,9 @@ fn setup(
         multiview: None,
     });
 
-    commands.insert_resource(RenderResources { pipeline });
+    commands.insert_resource(RenderResources {
+        pipeline: WgpuWrapper(pipeline),
+    });
 }
 
 fn draw(

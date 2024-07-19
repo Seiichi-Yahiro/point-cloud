@@ -1,10 +1,10 @@
 use crate::plugins::cell::shader::{FrustumsBuffer, FrustumsSettings, LoadedCellsBuffer};
 use crate::plugins::metadata::shader::MetadataBuffer;
-use crate::plugins::wgpu::Device;
+use crate::plugins::wgpu::{Device, WgpuWrapper};
 use bevy_ecs::prelude::*;
 
 #[derive(Resource)]
-pub struct ResourceBindGroupLayout(pub wgpu::BindGroupLayout);
+pub struct ResourceBindGroupLayout(pub WgpuWrapper<wgpu::BindGroupLayout>);
 
 pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -53,11 +53,11 @@ pub fn create_bind_group_layout(mut commands: Commands, device: Res<Device>) {
         ],
     });
 
-    commands.insert_resource(ResourceBindGroupLayout(layout));
+    commands.insert_resource(ResourceBindGroupLayout(WgpuWrapper(layout)));
 }
 
 #[derive(Resource)]
-pub struct ResourceBindGroup(pub wgpu::BindGroup);
+pub struct ResourceBindGroup(pub WgpuWrapper<wgpu::BindGroup>);
 
 pub fn create_bind_group(
     mut commands: Commands,
@@ -99,5 +99,5 @@ pub fn create_bind_group(
         ],
     });
 
-    commands.insert_resource(ResourceBindGroup(group));
+    commands.insert_resource(ResourceBindGroup(WgpuWrapper(group)));
 }
