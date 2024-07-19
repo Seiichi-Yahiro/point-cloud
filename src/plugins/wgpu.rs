@@ -130,7 +130,7 @@ impl WGPUPlugin {
             );
 
         app.add_schedule(Schedule::new(Render));
-        let mut main_schedule_order = app.world.resource_mut::<MainScheduleOrder>();
+        let mut main_schedule_order = app.world_mut().resource_mut::<MainScheduleOrder>();
         main_schedule_order.insert_after(Last, Render);
 
         app.configure_sets(Render, RenderPassSet.run_if(resource_exists::<RenderView>));
@@ -282,7 +282,7 @@ fn begin_frame(
                 }
                 SurfaceError::OutOfMemory => {
                     log::error!("Application is out of memory!");
-                    app_exit.send(AppExit);
+                    app_exit.send(AppExit::error());
                 }
             }
             return;

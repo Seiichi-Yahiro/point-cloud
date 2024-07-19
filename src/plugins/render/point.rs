@@ -2,6 +2,7 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::QueryData;
 use bevy_ecs::system::SystemParam;
+use bevy_state::prelude::*;
 use glam::Vec3;
 use itertools::Itertools;
 
@@ -88,7 +89,7 @@ impl Plugin for PointRenderPlugin {
         )
         .add_systems(Render, draw.in_set(RenderPassSet));
 
-        app.world
+        app.world_mut()
             .get_resource_mut::<CommandEncoders>()
             .unwrap()
             .register::<Self>();

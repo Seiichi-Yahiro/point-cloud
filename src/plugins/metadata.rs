@@ -1,6 +1,7 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{RunSystemOnce, SystemParam, SystemState};
+use bevy_state::prelude::*;
 use bounding_volume::Aabb;
 use glam::Vec3;
 use std::io::Read;
@@ -189,8 +190,6 @@ fn setup(
             .unwrap();
 
         next_metadata_state.set(MetadataState::Loading);
-    } else {
-        next_metadata_state.set(MetadataState::Loaded);
     }
 }
 

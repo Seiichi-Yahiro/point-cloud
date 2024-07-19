@@ -1,6 +1,7 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemId;
+use bevy_state::prelude::*;
 use glam::Vec3;
 
 use crate::plugins::camera::frustum::Frustum;
@@ -18,11 +19,12 @@ pub struct DebugPlugin;
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         {
-            let toggle_frustum = app.world.register_system(toggle_frustum);
-            let toggle_bounding_box = app.world.register_system(toggle_bounding_box);
-            let toggle_grid = app.world.register_system(toggle_grid);
-            let toggle_streaming_frustums = app.world.register_system(toggle_streaming_frustums);
-            let toggle_hierarchy = app.world.register_system(toggle_hierarchy);
+            let toggle_frustum = app.world_mut().register_system(toggle_frustum);
+            let toggle_bounding_box = app.world_mut().register_system(toggle_bounding_box);
+            let toggle_grid = app.world_mut().register_system(toggle_grid);
+            let toggle_streaming_frustums =
+                app.world_mut().register_system(toggle_streaming_frustums);
+            let toggle_hierarchy = app.world_mut().register_system(toggle_hierarchy);
 
             app.insert_resource(OneShotSystems {
                 toggle_frustum,

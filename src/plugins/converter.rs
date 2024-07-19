@@ -5,6 +5,7 @@ use std::sync::Arc;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemId, SystemState};
+use bevy_state::prelude::*;
 use caches::{Cache, LRUCache};
 use flume::{Receiver, TryRecvError};
 use parking_lot::Mutex;
@@ -30,8 +31,8 @@ pub struct ConverterPlugin;
 
 impl Plugin for ConverterPlugin {
     fn build(&self, app: &mut App) {
-        let next_file_system_id = app.world.register_system(next_file);
-        let read_batch_system_id = app.world.register_system(read_batch);
+        let next_file_system_id = app.world_mut().register_system(next_file);
+        let read_batch_system_id = app.world_mut().register_system(read_batch);
 
         app.insert_resource(FilesToConvert {
             next_file: next_file_system_id,

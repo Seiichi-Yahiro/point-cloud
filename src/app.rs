@@ -1,3 +1,4 @@
+use bevy_state::app::StatesPlugin;
 use bevy_time::TimePlugin;
 use cfg_if::cfg_if;
 use std::sync::Arc;
@@ -27,12 +28,13 @@ impl App {
         app.add_plugins(WinitPlugin::new(self.canvas_id));
 
         WGPUPlugin::build(
-            Arc::clone(app.world.get_resource::<Window>().unwrap()),
+            Arc::clone(app.world().get_resource::<Window>().unwrap()),
             &mut app,
         )
         .await;
 
-        app.add_plugins((TimePlugin, InputPlugin, CameraPlugin, FPSPlugin))
+        app.add_plugins((StatesPlugin, TimePlugin))
+            .add_plugins((InputPlugin, CameraPlugin, FPSPlugin))
             .add_plugins((
                 ThreadPoolPlugin,
                 MetadataPlugin { url: self.url },

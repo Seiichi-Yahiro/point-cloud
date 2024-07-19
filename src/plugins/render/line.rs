@@ -41,7 +41,7 @@ impl Plugin for LineRenderPlugin {
         app.add_systems(Startup, setup.in_set(PipelineSet))
             .add_systems(Render, draw.in_set(RenderPassSet));
 
-        app.world
+        app.world_mut()
             .get_resource_mut::<CommandEncoders>()
             .unwrap()
             .register::<Self>();

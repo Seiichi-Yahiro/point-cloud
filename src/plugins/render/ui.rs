@@ -19,7 +19,7 @@ impl Plugin for UiPlugin {
             .add_systems(PreUpdate, handle_input)
             .add_systems(Render, (prepare, ui, draw).chain().in_set(RenderPassSet));
 
-        app.world
+        app.world_mut()
             .get_resource_mut::<CommandEncoders>()
             .unwrap()
             .register::<Self>();

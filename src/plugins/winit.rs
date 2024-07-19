@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use bevy_app::prelude::*;
@@ -95,7 +97,7 @@ impl Plugin for WinitPlugin {
             }
 
             let event_loop = app
-                .world
+                .world_mut()
                 .remove_non_send_resource::<EventLoop<UserEvent>>()
                 .unwrap();
 
@@ -103,15 +105,18 @@ impl Plugin for WinitPlugin {
 
             let mut app_exit_event_reader = ManualEventReader::<AppExit>::default();
 
+            let exit = Rc::new(RefCell::new(AppExit::Success));
+            let winit_exit = exit.clone();
+
             let event_handler =
                 move |event: Event<UserEvent>, target: &EventLoopWindowTarget<UserEvent>| {
-                    let app_exit_events = app.world.get_resource_mut::<Events<AppExit>>().unwrap();
+                    let app_exit_events = app
+                        .world_mut()
+                        .get_resource_mut::<Events<AppExit>>()
+                        .unwrap();
 
-                    if app_exit_event_reader
-                        .read(&app_exit_events)
-                        .last()
-                        .is_some()
-                    {
+                    if let Some(app_exit) = app_exit_event_reader.read(&app_exit_events).next() {
+                        *winit_exit.borrow_mut() = app_exit.clone();
                         target.exit();
                         return;
                     }
@@ -124,14 +129,15 @@ impl Plugin for WinitPlugin {
                             event: window_event,
                             ..
                         } => {
-                            app.world.send_event(WindowEvent(window_event.clone()));
+                            app.world_mut()
+                                .send_event(WindowEvent(window_event.clone()));
 
                             match window_event {
                                 winit::event::WindowEvent::RedrawRequested => {
                                     app.update();
                                 }
                                 winit::event::WindowEvent::Resized(new_size) => {
-                                    app.world
+                                    app.world_mut()
                                         .send_event(WindowResized {
                                             physical_size: PhysicalSize::new(
                                                 new_size.width.max(1),
@@ -158,6 +164,9 @@ impl Plugin for WinitPlugin {
                     event_loop.run(event_handler).unwrap();
                 }
             }
+
+            let exit = exit.borrow().clone();
+            exit
         });
     }
 }
