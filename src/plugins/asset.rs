@@ -4,13 +4,12 @@ use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::ops::{Deref, DerefMut};
 
+use crate::plugins::asset::source::{Source, SourceError};
+use crate::plugins::thread_pool::{ThreadPool, ThreadPoolRes};
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use flume::{Receiver, Sender, TryRecvError};
 use rustc_hash::{FxHashMap, FxHashSet};
-
-use crate::plugins::asset::source::{Source, SourceError};
-use crate::plugins::thread_pool::{ThreadPool, ThreadPoolRes};
 
 pub mod source;
 
@@ -500,10 +499,65 @@ where
                         });
 
                         #[cfg(target_arch = "wasm32")]
-                        thread_pool.execute_async(async move {
-                            let asset = source.load().await;
-                            loaded_sender.send(LoadedAssetMsg { id, asset }).unwrap();
-                        });
+                        {
+                            match source {
+                                Source::PathInDirectory { directory, path } => {
+                                    thread_pool.execute(
+                                        move |params| {
+                                            Box::pin(async move {
+                                                use wasm_bindgen::JsCast;
+
+                                                let dir = params
+                                                    .get(0)
+                                                    .dyn_into::<web_sys::FileSystemDirectoryHandle>(
+                                                    )
+                                                    .unwrap();
+
+                                                let asset = Source::PathInDirectory {
+                                                    directory: crate::web::WebDir(dir),
+                                                    path,
+                                                }
+                                                .load()
+                                                .await;
+
+                                                loaded_sender
+                                                    .send(LoadedAssetMsg { id, asset })
+                                                    .unwrap();
+                                            })
+                                        },
+                                        Some(js_sys::Array::of1(&directory.0)),
+                                    );
+                                }
+                                Source::URL(url) => {
+                                    thread_pool.execute(
+                                        move |_params| {
+                                            Box::pin(async move {
+                                                let asset = Source::URL(url).load().await;
+
+                                                loaded_sender
+                                                    .send(LoadedAssetMsg { id, asset })
+                                                    .unwrap();
+                                            })
+                                        },
+                                        None,
+                                    );
+                                }
+                                Source::None => {
+                                    thread_pool.execute(
+                                        move |_params| {
+                                            Box::pin(async move {
+                                                let asset = Source::None.load().await;
+
+                                                loaded_sender
+                                                    .send(LoadedAssetMsg { id, asset })
+                                                    .unwrap();
+                                            })
+                                        },
+                                        None,
+                                    );
+                                }
+                            }
+                        }
                     }
                 },
                 Err(TryRecvError::Empty) => {

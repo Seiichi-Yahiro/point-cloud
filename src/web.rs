@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 #[derive(Debug, Clone)]
-pub struct WebDir(web_sys::FileSystemDirectoryHandle);
+pub struct WebDir(pub web_sys::FileSystemDirectoryHandle);
 
 impl WebDir {
     pub async fn choose() -> Result<Self, JsValue> {
