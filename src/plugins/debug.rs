@@ -1,27 +1,31 @@
-use crate::plugins::camera::frustum::Frustum;
-use crate::plugins::camera::{Camera, Visibility};
-use crate::plugins::cell::frustums::StreamingFrustums;
-use crate::plugins::cell::{CellHeader, CellStreamingSet};
-use crate::plugins::metadata::{ActiveMetadata, MetadataState};
-use crate::plugins::render::line::utils::{line_box, line_strip};
-use crate::plugins::render::line::Line;
-use crate::plugins::render::vertex::VertexBuffer;
-use crate::plugins::wgpu::Device;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemId;
 use glam::Vec3;
+
+use bevy_state::prelude::*;
+
+use crate::plugins::camera::{Camera, Visibility};
+use crate::plugins::camera::frustum::Frustum;
+use crate::plugins::cell::{CellHeader, CellStreamingSet};
+use crate::plugins::cell::frustums::StreamingFrustums;
+use crate::plugins::metadata::{ActiveMetadata, MetadataState};
+use crate::plugins::render::line::Line;
+use crate::plugins::render::line::utils::{line_box, line_strip};
+use crate::plugins::render::vertex::VertexBuffer;
+use crate::plugins::wgpu::Device;
 
 pub struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         {
-            let toggle_frustum = app.world.register_system(toggle_frustum);
-            let toggle_bounding_box = app.world.register_system(toggle_bounding_box);
-            let toggle_grid = app.world.register_system(toggle_grid);
-            let toggle_streaming_frustums = app.world.register_system(toggle_streaming_frustums);
-            let toggle_hierarchy = app.world.register_system(toggle_hierarchy);
+            let toggle_frustum = app.world_mut().register_system(toggle_frustum);
+            let toggle_bounding_box = app.world_mut().register_system(toggle_bounding_box);
+            let toggle_grid = app.world_mut().register_system(toggle_grid);
+            let toggle_streaming_frustums =
+                app.world_mut().register_system(toggle_streaming_frustums);
+            let toggle_hierarchy = app.world_mut().register_system(toggle_hierarchy);
 
             app.insert_resource(OneShotSystems {
                 toggle_frustum,

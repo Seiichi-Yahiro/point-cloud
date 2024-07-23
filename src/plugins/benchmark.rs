@@ -1,21 +1,21 @@
-mod usc;
+use std::fs::{create_dir, File};
+use std::io::{BufWriter, ErrorKind, Write};
+use std::time::Duration;
+
+use bevy_app::prelude::*;
+use bevy_diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy_easings::{custom_ease_system, EasingChainComponent, EasingComponent};
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::RunSystemOnce;
+use bevy_state::prelude::*;
+use bevy_time::common_conditions::on_real_timer;
+use itertools::Itertools;
 
 use crate::plugins::camera::Camera;
 use crate::plugins::cell::{LoadedCells, LoadingCells};
 use crate::transform::Transform;
-use bevy_app::prelude::*;
-use bevy_diagnostic::{
-    DiagnosticsStore, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-};
-use bevy_easings::{custom_ease_system, EasingChainComponent, EasingComponent};
-use bevy_ecs::prelude::*;
-use bevy_ecs::system::RunSystemOnce;
-use bevy_time::common_conditions::on_real_timer;
-use glam::{Quat, Vec3};
-use itertools::Itertools;
-use std::fs::{create_dir, File};
-use std::io::{BufWriter, ErrorKind, Write};
-use std::time::Duration;
+
+mod usc;
 
 pub struct BenchmarkPlugin;
 
@@ -205,14 +205,14 @@ fn measure(
         .and_then(|fps| fps.smoothed())
         .unwrap_or(0.0);
 
-    let cpu = diagnostics
-        .get(&SystemInformationDiagnosticsPlugin::CPU_USAGE)
-        .and_then(|cpu| cpu.smoothed())
-        .unwrap_or(0.0);
+    /* let cpu = diagnostics
+    .get(&SystemInformationDiagnosticsPlugin::CPU_USAGE)
+    .and_then(|cpu| cpu.smoothed())
+    .unwrap_or(0.0);*/
 
     benchmark.0.push(BenchmarkData {
         fps,
-        cpu,
+        cpu: 0.0,
         loaded_points: cell_stats.loaded_points,
         loaded_cells: loaded_cells.0.len() as u32,
         loading_cells: loading_cells.loading.len() as u32,

@@ -1,7 +1,5 @@
 use bevy_app::prelude::*;
-use bevy_diagnostic::{
-    DiagnosticsStore, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-};
+use bevy_diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy_ecs::prelude::*;
 use egui::epaint::Shadow;
 use egui::{Context, Visuals};
@@ -22,7 +20,7 @@ impl Plugin for UiPlugin {
             .add_systems(PreUpdate, handle_input)
             .add_systems(Render, (prepare, ui, draw).chain().in_set(RenderPassSet));
 
-        app.world
+        app.world_mut()
             .get_resource_mut::<CommandEncoders>()
             .unwrap()
             .register::<Self>();
@@ -112,13 +110,13 @@ fn ui(world: &mut World) {
                             ui.label(format!("FPS: {:>4.0}", fps));
                         }
 
-                        let cpu = diagnostics
+                        /*let cpu = diagnostics
                             .get(&SystemInformationDiagnosticsPlugin::CPU_USAGE)
                             .and_then(|cpu| cpu.smoothed());
 
                         if let Some(cpu) = cpu {
                             ui.label(format!("CPU: {:>2.0} %", cpu));
-                        }
+                        }*/
                     }
 
                     egui::CollapsingHeader::new("Metadata")

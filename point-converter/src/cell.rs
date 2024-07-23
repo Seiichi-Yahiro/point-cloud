@@ -1,11 +1,10 @@
 use std::collections::hash_map::Entry;
-use std::hash::BuildHasherDefault;
 use std::io::{Read, Write};
 use std::path::Path;
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use glam::{IVec3, Vec3};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::hex::{HexWorldIndex, OffsetIndex};
 use crate::metadata::{Metadata, MetadataConfig};
@@ -44,10 +43,7 @@ impl Cell {
     pub fn new(id: CellId, sub_grid_dimension: u32, size: f32, pos: Vec3, capacity: usize) -> Self {
         Self {
             header: Header::new(id, sub_grid_dimension, size, pos),
-            points_grid: FxHashMap::with_capacity_and_hasher(
-                capacity,
-                BuildHasherDefault::default(),
-            ),
+            points_grid: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher),
             overflow: FxHashMap::default(),
         }
     }
@@ -188,10 +184,8 @@ impl Cell {
     pub fn read_from(reader: &mut dyn Read) -> Result<Self, std::io::Error> {
         let header = Header::read_from(reader)?;
 
-        let mut points_grid = FxHashMap::with_capacity_and_hasher(
-            header.number_of_points as usize,
-            BuildHasherDefault::default(),
-        );
+        let mut points_grid =
+            FxHashMap::with_capacity_and_hasher(header.number_of_points as usize, FxBuildHasher);
 
         for _ in 0..header.number_of_points {
             let point = Point::read_from(reader)?;
@@ -202,8 +196,7 @@ impl Cell {
         }
 
         let overflow_len = reader.read_u8()? as usize;
-        let mut overflow =
-            FxHashMap::with_capacity_and_hasher(overflow_len, BuildHasherDefault::default());
+        let mut overflow = FxHashMap::with_capacity_and_hasher(overflow_len, FxBuildHasher);
 
         for _ in 0..overflow_len {
             let key = {

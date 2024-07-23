@@ -1,4 +1,4 @@
-use bevy_easings::{EaseValue, Lerp};
+use bevy_easings::Lerp;
 use bevy_ecs::prelude::Component;
 use glam::{Mat3, Mat4, Quat, Vec3};
 use std::ops::Mul;

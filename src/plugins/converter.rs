@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
-use std::hash::BuildHasherDefault;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemId, SystemState};
+use bevy_state::prelude::*;
 use caches::{Cache, LRUCache};
 use flume::{Receiver, TryRecvError};
 use parking_lot::Mutex;
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use thousands::Separable;
 
 use bounding_volume::Aabb;
@@ -31,8 +31,8 @@ pub struct ConverterPlugin;
 
 impl Plugin for ConverterPlugin {
     fn build(&self, app: &mut App) {
-        let next_file_system_id = app.world.register_system(next_file);
-        let read_batch_system_id = app.world.register_system(read_batch);
+        let next_file_system_id = app.world_mut().register_system(next_file);
+        let read_batch_system_id = app.world_mut().register_system(read_batch);
 
         app.insert_resource(FilesToConvert {
             next_file: next_file_system_id,
@@ -471,7 +471,7 @@ fn get_handles_for_loading_tasks(
 
 #[derive(Debug, Resource)]
 enum CellCache {
-    LRU(LRUCache<CellId, AssetHandle<Cell>, BuildHasherDefault<FxHasher>>),
+    LRU(LRUCache<CellId, AssetHandle<Cell>, FxBuildHasher>),
     Map(FxHashMap<CellId, AssetHandle<Cell>>),
 }
 
@@ -487,7 +487,7 @@ impl CellCache {
         match self {
             CellCache::LRU(_) => {}
             CellCache::Map(it) => {
-                let mut lru = LRUCache::with_hasher(100, BuildHasherDefault::default()).unwrap();
+                let mut lru = LRUCache::with_hasher(100, FxBuildHasher).unwrap();
 
                 for (id, handle) in it.drain().take(100) {
                     lru.put(id, handle);
@@ -501,10 +501,7 @@ impl CellCache {
     fn convert_to_map(&mut self) {
         match self {
             CellCache::LRU(it) => {
-                let mut map = FxHashMap::with_capacity_and_hasher(
-                    it.cap() * 2,
-                    BuildHasherDefault::default(),
-                );
+                let mut map = FxHashMap::with_capacity_and_hasher(it.cap() * 2, FxBuildHasher);
 
                 while let Some((id, handle)) = it.remove_lru() {
                     map.insert(id, handle);
@@ -546,10 +543,7 @@ impl CellCache {
 
 impl Default for CellCache {
     fn default() -> Self {
-        Self::Map(FxHashMap::with_capacity_and_hasher(
-            100,
-            BuildHasherDefault::default(),
-        ))
+        Self::Map(FxHashMap::with_capacity_and_hasher(100, FxBuildHasher))
     }
 }
 
