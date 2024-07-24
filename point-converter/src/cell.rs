@@ -276,9 +276,7 @@ impl Header {
 
     fn sub_grid_index_for_point(&self, point: Point) -> OffsetIndex {
         let sub_cell_size = self.size / self.sub_grid_dimension as f32;
-        let offset = point.pos - self.pos;
-
-        OffsetIndex::from_world(offset, sub_cell_size / 2.0)
+        OffsetIndex::from_world(point.pos, sub_cell_size / 2.0)
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
