@@ -174,6 +174,7 @@ fn read_batch(
     mut point_batch_receiver: ResMut<PointBatchReceiver>,
     active_metadata: ActiveMetadata,
     mut files_to_convert: ResMut<FilesToConvert>,
+    settings: Res<Settings>,
 ) {
     let Some(reader) = &point_reader.0 else {
         return;
@@ -194,8 +195,10 @@ fn read_batch(
     let (sender, receiver) = flume::bounded(1);
     point_batch_receiver.0 = Some(receiver);
 
+    let batch_size = settings.batch_size;
+
     thread_pool.execute(move || {
-        let result = reader.lock().get_batch(500_000).map(|points| {
+        let result = reader.lock().get_batch(batch_size).map(|points| {
             let aabb = Aabb::from(points.iter().map(|point| point.pos)).unwrap();
             let grouped_points = group_points(points, 0, &config);
 
@@ -591,11 +594,15 @@ fn add_points_to_cell_system(
 #[derive(Debug, Resource)]
 struct Settings {
     auto_save: bool,
+    batch_size: usize,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { auto_save: false }
+        Self {
+            auto_save: false,
+            batch_size: 50_000,
+        }
     }
 }
 
@@ -681,6 +688,15 @@ pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
 
         let (mut settings, mut cell_cache, loaded_metadata, mut metadata_manager, mut cell_manager) =
             params.get_mut(world);
+
+        let mut batch_size = settings.batch_size;
+        let batch_size_slider = egui::Slider::new(&mut batch_size, 10_000..=500_000)
+            .step_by(10_000.0)
+            .custom_formatter(|n, _| n.separate_with_commas());
+
+        if ui.add(batch_size_slider).changed() {
+            settings.batch_size = batch_size;
+        }
 
         let mut auto_save = settings.auto_save;
         let checkbox = egui::Checkbox::new(&mut auto_save, "Auto save");
