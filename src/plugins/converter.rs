@@ -443,7 +443,7 @@ fn get_handles_for_loading_tasks(
                         let cell_pos = metadata.config.cell_pos(id.index, cell_size);
                         let cell = Cell::new(
                             id,
-                            metadata.config.sub_grid_dimension,
+                            metadata.config.sub_cell_size(cell_size),
                             cell_size,
                             cell_pos,
                             10_000,

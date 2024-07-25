@@ -92,6 +92,10 @@ impl MetadataConfig {
         self.max_cell_size / 2u32.pow(hierarchy) as f32
     }
 
+    pub fn sub_cell_size(&self, cell_size: f32) -> f32 {
+        cell_size / self.sub_grid_dimension as f32
+    }
+
     pub fn cell_index(&self, pos: Vec3, cell_size: f32) -> IVec3 {
         (pos / cell_size).floor().as_ivec3()
     }
