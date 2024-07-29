@@ -40,9 +40,9 @@ pub struct Cell {
 impl Cell {
     pub const EXTENSION: &'static str = "bin";
 
-    pub fn new(id: CellId, sub_grid_dimension: u32, size: f32, pos: Vec3, capacity: usize) -> Self {
+    pub fn new(id: CellId, sub_cell_size: f32, size: f32, pos: Vec3, capacity: usize) -> Self {
         Self {
-            header: Header::new(id, sub_grid_dimension, size, pos),
+            header: Header::new(id, sub_cell_size, size, pos),
             points_grid: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher),
             overflow: FxHashMap::default(),
         }
@@ -72,8 +72,7 @@ impl Cell {
 
         match self.points_grid.entry(index) {
             Entry::Occupied(mut entry) => {
-                let sub_cell_size = self.header.size / self.header.sub_grid_dimension as f32;
-                let pos = index.to_world(sub_cell_size / 2.0);
+                let pos = index.to_world(self.header.sub_cell_size / 2.0);
 
                 let old_distance = pos.distance_squared(entry.get().pos);
                 let new_distance = pos.distance_squared(point.pos);
@@ -250,11 +249,11 @@ pub struct Header {
     /// Number of overflowing points which would belong to the next hierarchy.
     pub number_of_overflow_points: u32,
 
-    /// Inner sub grid. [sub_grid_dimension]^3 is the number of points a cell can hold.
-    pub sub_grid_dimension: u32,
-
     /// The side length of the cubic cell.
     pub size: f32,
+
+    /// Size of the inner grid.
+    pub sub_cell_size: f32,
 
     /// The position of the cell in the world.
     /// This is the center of the cell.
@@ -262,23 +261,20 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn new(id: CellId, sub_grid_dimension: u32, size: f32, pos: Vec3) -> Self {
+    pub fn new(id: CellId, sub_cell_size: f32, size: f32, pos: Vec3) -> Self {
         Self {
             id,
             total_number_of_points: 0,
             number_of_points: 0,
             number_of_overflow_points: 0,
-            sub_grid_dimension,
+            sub_cell_size,
             size,
             pos,
         }
     }
 
     fn sub_grid_index_for_point(&self, point: Point) -> OffsetIndex {
-        let sub_cell_size = self.size / self.sub_grid_dimension as f32;
-        let offset = point.pos - self.pos;
-
-        OffsetIndex::from_world(offset, sub_cell_size / 2.0)
+        OffsetIndex::from_world(point.pos, self.sub_cell_size / 2.0)
     }
 
     pub fn write_to(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
@@ -291,8 +287,8 @@ impl Header {
         writer.write_u32::<Endianess>(self.number_of_points)?;
         writer.write_u32::<Endianess>(self.number_of_overflow_points)?;
 
-        writer.write_u32::<Endianess>(self.sub_grid_dimension)?;
         writer.write_f32::<Endianess>(self.size)?;
+        writer.write_f32::<Endianess>(self.sub_cell_size)?;
 
         writer.write_f32::<Endianess>(self.pos.x)?;
         writer.write_f32::<Endianess>(self.pos.y)?;
@@ -317,8 +313,8 @@ impl Header {
         let number_of_points = reader.read_u32::<Endianess>()?;
         let number_of_overflow_points = reader.read_u32::<Endianess>()?;
 
-        let sub_grid_dimension = reader.read_u32::<Endianess>()?;
         let size = reader.read_f32::<Endianess>()?;
+        let sub_cell_size = reader.read_f32::<Endianess>()?;
 
         let pos = {
             let x = reader.read_f32::<Endianess>()?;
@@ -332,7 +328,7 @@ impl Header {
             total_number_of_points,
             number_of_points,
             number_of_overflow_points,
-            sub_grid_dimension,
+            sub_cell_size,
             size,
             pos,
         })

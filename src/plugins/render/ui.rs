@@ -104,19 +104,19 @@ fn ui(world: &mut World) {
 
                         let fps = diagnostics
                             .get(&FrameTimeDiagnosticsPlugin::FPS)
-                            .and_then(|fps| fps.smoothed());
+                            .and_then(|it| it.smoothed());
 
                         if let Some(fps) = fps {
                             ui.label(format!("FPS: {:>4.0}", fps));
                         }
 
-                        /*let cpu = diagnostics
-                            .get(&SystemInformationDiagnosticsPlugin::CPU_USAGE)
-                            .and_then(|cpu| cpu.smoothed());
+                        let frame_time = diagnostics
+                            .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+                            .and_then(|it| it.smoothed());
 
-                        if let Some(cpu) = cpu {
-                            ui.label(format!("CPU: {:>2.0} %", cpu));
-                        }*/
+                        if let Some(frame_time) = frame_time {
+                            ui.label(format!("Frame: {:>2.2} ms", frame_time));
+                        }
                     }
 
                     egui::CollapsingHeader::new("Metadata")

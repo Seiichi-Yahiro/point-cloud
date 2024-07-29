@@ -193,7 +193,7 @@ impl Converter {
                     let cell_pos = self.metadata.config.cell_pos(id.index, cell_size);
                     Cell::new(
                         id,
-                        self.metadata.config.sub_grid_dimension,
+                        self.metadata.config.sub_cell_size(cell_size),
                         cell_size,
                         cell_pos,
                         50_000,

@@ -25,10 +25,10 @@ egui-wgpu = "0.27.0"
 egui-winit = { version = "0.27.0", default-features = false }
 bevy_app = "0.14.0"
 bevy_ecs = "0.14.0"
+bevy_core = "0.14.0"
+bevy_diagnostic = "0.14.0"
 bevy_state = "0.14.0"
 bevy_time = "0.14.0"
-bevy_core = "0.14.0"
-bevy_diagnostic = { version = "0.14.0" }
 bevy_easings = "0.14.0"
 log = "0.4.21"
 env_logger = "0.11.3"
