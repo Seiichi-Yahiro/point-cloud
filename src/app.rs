@@ -1,3 +1,5 @@
+use bevy_core::FrameCountPlugin;
+use bevy_diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy_state::app::StatesPlugin;
 use bevy_time::TimePlugin;
 use cfg_if::cfg_if;
@@ -7,7 +9,6 @@ use url::Url;
 use crate::plugins::camera::CameraPlugin;
 use crate::plugins::cell::CellPlugin;
 use crate::plugins::debug::DebugPlugin;
-use crate::plugins::fps::FPSPlugin;
 use crate::plugins::input::InputPlugin;
 use crate::plugins::metadata::MetadataPlugin;
 use crate::plugins::render::RenderPlugin;
@@ -33,18 +34,23 @@ impl App {
         )
         .await;
 
-        app.add_plugins((StatesPlugin, TimePlugin))
-            .add_plugins((InputPlugin, CameraPlugin, FPSPlugin))
-            .add_plugins((
-                ThreadPoolPlugin,
-                MetadataPlugin { url: self.url },
-                CellPlugin,
-                #[cfg(not(target_arch = "wasm32"))]
-                crate::plugins::converter::ConverterPlugin,
-                DebugPlugin,
-                RenderPlugin,
-            ))
-            .run();
+        app.add_plugins((
+            StatesPlugin,
+            TimePlugin,
+            FrameCountPlugin,
+            FrameTimeDiagnosticsPlugin,
+        ))
+        .add_plugins((InputPlugin, CameraPlugin))
+        .add_plugins((
+            ThreadPoolPlugin,
+            MetadataPlugin { url: self.url },
+            CellPlugin,
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::plugins::converter::ConverterPlugin,
+            DebugPlugin,
+            RenderPlugin,
+        ))
+        .run();
     }
 }
 

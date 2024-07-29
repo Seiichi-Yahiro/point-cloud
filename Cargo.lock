@@ -412,6 +412,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_diagnostic"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b7f82011fd70048be282526a99756d54bf00e874edafa9664ba0dc247678f03"
+dependencies = [
+ "bevy_app",
+ "bevy_core",
+ "bevy_ecs",
+ "bevy_tasks",
+ "bevy_time",
+ "bevy_utils",
+ "const-fnv1a-hash",
+]
+
+[[package]]
 name = "bevy_ecs"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,6 +979,12 @@ dependencies = [
  "log",
  "web-sys",
 ]
+
+[[package]]
+name = "const-fnv1a-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32b13ea120a812beba79e34316b3942a857c86ec1593cb34f27bb28272ce2cca"
 
 [[package]]
 name = "core-foundation"
@@ -2295,6 +2316,8 @@ name = "point-cloud"
 version = "0.1.0"
 dependencies = [
  "bevy_app",
+ "bevy_core",
+ "bevy_diagnostic",
  "bevy_ecs",
  "bevy_state",
  "bevy_time",
@@ -2326,7 +2349,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "web-time 1.1.0",
  "wgpu",
  "winit",
 ]

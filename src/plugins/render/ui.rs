@@ -1,4 +1,5 @@
 use bevy_app::prelude::*;
+use bevy_diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy_ecs::prelude::*;
 use egui::epaint::Shadow;
 use egui::{Context, Visuals};
@@ -98,7 +99,25 @@ fn ui(world: &mut World) {
             .default_width(150.0)
             .show_animated(&context, side_panel_opened.0, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    crate::plugins::fps::draw_ui(ui, world);
+                    {
+                        let diagnostics = world.get_resource::<DiagnosticsStore>().unwrap();
+
+                        let fps = diagnostics
+                            .get(&FrameTimeDiagnosticsPlugin::FPS)
+                            .and_then(|it| it.smoothed());
+
+                        if let Some(fps) = fps {
+                            ui.label(format!("FPS: {:>4.0}", fps));
+                        }
+
+                        let frame_time = diagnostics
+                            .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+                            .and_then(|it| it.smoothed());
+
+                        if let Some(frame_time) = frame_time {
+                            ui.label(format!("Frame: {:>2.2} ms", frame_time));
+                        }
+                    }
 
                     egui::CollapsingHeader::new("Metadata")
                         .default_open(true)
