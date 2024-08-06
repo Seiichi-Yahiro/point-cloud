@@ -21,7 +21,7 @@ use crate::plugins::render::{bind_groups, BindGroupLayoutSet, BindGroupSet, Pipe
 use crate::plugins::wgpu::{CommandEncoders, GlobalRenderResources, Render, RenderPassSet};
 use crate::transform::Transform;
 
-mod pipelines;
+pub mod pipelines;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -196,7 +196,13 @@ fn draw(
                         occlusion_query_set: None,
                     });
 
-                    render_pass.set_pipeline(&render_resources.render_pipeline.0);
+                    let render_pipeline = if render_resources.render_pipeline.use_voronoi {
+                        &render_resources.render_pipeline.voronoi
+                    } else {
+                        &render_resources.render_pipeline.no_voronoi
+                    };
+
+                    render_pass.set_pipeline(render_pipeline);
                     render_pass.set_bind_group(0, &camera_bind_group.0, &[]);
                     render_pass.set_bind_group(1, &render_resources.resource_bind_group.0, &[]);
 

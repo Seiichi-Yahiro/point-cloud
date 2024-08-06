@@ -94,14 +94,14 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     return out;
 }
 
-struct FragmentOutput {
+struct VoronoiFragmentOutput {
     @builtin(frag_depth) depth: f32,
     @location(0) color: vec4<f32>,
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> FragmentOutput {
-    var out: FragmentOutput;
+fn fs_voronoi(in: VertexOutput) -> VoronoiFragmentOutput {
+    var out: VoronoiFragmentOutput;
 
     if (length(in.splat_pos) > in.splat_radius) {
         discard;
@@ -117,5 +117,22 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     
     out.color = vec4<f32>(in.color);
     out.depth = z;
+    return out;
+}
+
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+}
+
+@fragment
+fn fs_no_voronoi(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+
+    if (length(in.splat_pos) > in.splat_radius) {
+        discard;
+    }
+    
+    out.color = vec4<f32>(in.color);
+
     return out;
 }

@@ -7,7 +7,11 @@ use bevy_ecs::change_detection::Res;
 use bevy_ecs::prelude::{Commands, Resource};
 
 #[derive(Resource)]
-pub struct PointRenderPipeline(pub wgpu::RenderPipeline);
+pub struct PointRenderPipeline {
+    pub use_voronoi: bool,
+    pub voronoi: wgpu::RenderPipeline,
+    pub no_voronoi: wgpu::RenderPipeline,
+}
 
 pub fn create_render_pipeline(
     mut commands: Commands,
@@ -24,7 +28,7 @@ pub fn create_render_pipeline(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let descriptor = wgpu::RenderPipelineDescriptor {
         label: Some("point-renderer-pipeline"),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
@@ -53,17 +57,39 @@ pub fn create_render_pipeline(
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
+        fragment: None,
+        multiview: None,
+    };
+
+    let voronoi_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         fragment: Some(wgpu::FragmentState {
             module: &shader,
-            entry_point: "fs_main",
+            entry_point: "fs_voronoi",
             targets: &[Some(wgpu::ColorTargetState {
                 format: config.format,
                 blend: Some(wgpu::BlendState::REPLACE),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        ..descriptor.clone()
     });
 
-    commands.insert_resource(PointRenderPipeline(pipeline));
+    let no_voronoi_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: "fs_no_voronoi",
+            targets: &[Some(wgpu::ColorTargetState {
+                format: config.format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        ..descriptor
+    });
+
+    commands.insert_resource(PointRenderPipeline {
+        use_voronoi: true,
+        voronoi: voronoi_pipeline,
+        no_voronoi: no_voronoi_pipeline,
+    });
 }

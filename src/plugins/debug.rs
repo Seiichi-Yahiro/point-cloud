@@ -371,6 +371,8 @@ fn toggle_hierarchy(
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, world: &mut World) {
+    ui.checkbox(&mut world.get_resource_mut::<crate::plugins::render::point::pipelines::render::PointRenderPipeline>().unwrap().use_voronoi, "Voronoi").changed();
+
     world.resource_scope(|world, mut state: Mut<State>| {
         if ui.checkbox(&mut state.show_frustum, "Frustum").changed() {
             let toggle_frustum = world
