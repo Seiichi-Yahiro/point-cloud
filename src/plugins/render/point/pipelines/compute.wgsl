@@ -77,6 +77,7 @@ var<uniform> cell: Cell;
 @group(3) @binding(0)
 var depth_texture: texture_depth_2d;
 
+// when this function is changed, also adjust the function in the point converter metadata
 fn cell_index(position: vec3<f32>, cell_size: f32) -> vec3<i32> {
     return vec3<i32>(floor(position / cell_size));
 }

@@ -96,6 +96,7 @@ impl MetadataConfig {
         cell_size / self.sub_grid_dimension as f32
     }
 
+    // when this function is changed, also adjust the function inside the compute shader
     pub fn cell_index(&self, pos: Vec3, cell_size: f32) -> IVec3 {
         (pos / cell_size).floor().as_ivec3()
     }
